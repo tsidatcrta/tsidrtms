@@ -1,0 +1,15 @@
+{
+  "name": "rtms-training-system",
+  "version": "1.0.0",
+  "description": "ระบบบริหารจัดการการฝึกทหารใหม่และสัมมนา (RTMS / R-TRAIN)",
+  "scripts": {
+    "dev": "npx wrangler pages dev public --compatibility-date=2024-11-01",
+    "deploy": "npx wrangler pages deploy public"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^0.10.4"
+  },
+  "devDependencies": {
+    "wrangler": "^3.80.0"
+  }
+}

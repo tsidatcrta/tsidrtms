@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RTMS | ระบบบริหารจัดการการฝึกทหารใหม่และสัมมนา</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Sarabun', 'sans-serif'] },
+          colors: {
+            olive: {
+              50: '#f4f6f0',
+              100: '#e6eadc',
+              200: '#cdd6bb',
+              500: '#5d6e3e',
+              600: '#4b5932',
+              700: '#3b4727',
+              800: '#2d361e',
+              900: '#1f2614',
+            }
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-slate-100 text-slate-800 font-sans antialiased">
+
+  <!-- ==================== VIEW 1: LOGIN PORTAL ==================== -->
+  <div id="login-view" class="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-olive-900 via-olive-800 to-slate-900">
+    <div class="w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden border border-olive-200">
+      <div class="bg-olive-800 px-6 py-8 text-center text-white border-b-4 border-amber-500">
+        <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-olive-700 border-2 border-amber-400 mb-3 shadow-inner">
+          <svg class="w-8 h-8 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+          </svg>
+        </div>
+        <h1 class="text-2xl font-bold tracking-wide">ระบบ RTMS / R-TRAIN</h1>
+        <p class="text-olive-200 text-sm mt-1">ระบบบริหารจัดการการฝึกทหารใหม่และสัมมนา<br>กตฝ.สกฝ.ยศ.ทบ.</p>
+      </div>
+
+      <form id="login-form" class="p-6 space-y-5">
+        <div>
+          <label class="block text-sm font-semibold text-slate-700 mb-1">รอบปีงบประมาณ / ผลัดการฝึก</label>
+          <select id="batch-select" class="w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-slate-800 bg-slate-50 focus:border-olive-600 focus:ring-2 focus:ring-olive-200 outline-none font-medium">
+            <option value="">กำลังโหลดข้อมูลรอบการฝึก...</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-sm font-semibold text-slate-700 mb-1">หมายเลขโทรศัพท์ (Username)</label>
+          <input type="tel" id="phone-input" required maxlength="10" placeholder="เช่น 0800000000"
+            class="w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-slate-800 focus:border-olive-600 focus:ring-2 focus:ring-olive-200 outline-none" />
+        </div>
+
+        <div>
+          <label class="block text-sm font-semibold text-slate-700 mb-1">รหัสผ่าน / PIN 6 หลัก</label>
+          <input type="password" id="pin-input" required maxlength="12" placeholder="••••••"
+            class="w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-slate-800 focus:border-olive-600 focus:ring-2 focus:ring-olive-200 outline-none" />
+        </div>
+
+        <div id="login-error" class="hidden rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700"></div>
+
+        <button type="submit" id="login-btn"
+          class="w-full bg-olive-700 hover:bg-olive-800 text-white font-semibold py-3 rounded-lg shadow-md transition duration-150 flex items-center justify-center gap-2">
+          <span>เข้าสู่ระบบ</span>
+        </button>
+
+        <p class="text-center text-xs text-slate-400 pt-1">
+          ทดสอบระบบ: เบอร์ <span class="font-mono text-slate-600">0800000000</span> | รหัส <span class="font-mono text-slate-600">123456</span>
+        </p>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==================== VIEW 2: MAIN DASHBOARD ==================== -->
+  <div id="dashboard-view" class="hidden min-h-screen flex flex-col">
+    <!-- Top Navbar -->
+    <header class="bg-olive-800 text-white shadow-md border-b-2 border-amber-500">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-lg bg-olive-700 border border-amber-400 flex items-center justify-center font-bold text-amber-400">
+            RT
+          </div>
+          <div>
+            <span class="font-bold text-lg tracking-wide">RTMS</span>
+            <span id="nav-batch-badge" class="ml-2 px-2.5 py-0.5 text-xs font-semibold rounded-full bg-amber-500 text-olive-900">
+              ผลัดที่ 2/69
+            </span>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-4">
+          <div class="text-right hidden sm:block">
+            <div id="user-fullname" class="text-sm font-semibold"></div>
+            <div id="user-role-unit" class="text-xs text-olive-200"></div>
+          </div>
+          <button onclick="logout()" class="px-3 py-1.5 rounded-lg bg-olive-900 hover:bg-red-700 text-xs font-medium transition">
+            ออกจากระบบ
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+      
+      <!-- Top KPI Cards -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-200 border-l-4 border-l-olive-600">
+          <p class="text-sm text-slate-500 font-medium">หน่วยฝึกทหารใหม่ทั่วประเทศ</p>
+          <p id="kpi-total-units" class="text-3xl font-bold text-olive-800 mt-1">-</p>
+          <p class="text-xs text-slate-400 mt-1">หน่วยฝึกที่เปิดรับในรอบนี้</p>
+        </div>
+
+        <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-200 border-l-4 border-l-amber-500">
+          <p class="text-sm text-slate-500 font-medium">ยอดทหารใหม่รวมทั้งสิ้น</p>
+          <p id="kpi-total-recruits" class="text-3xl font-bold text-slate-800 mt-1">-</p>
+          <p class="text-xs text-slate-400 mt-1">นาย (ตามบัญชีจัดสรร)</p>
+        </div>
+
+        <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-200 border-l-4 border-l-emerald-600">
+          <p class="text-sm text-slate-500 font-medium">ส่งแบบรายงานแล้ว</p>
+          <p class="text-3xl font-bold text-emerald-700 mt-1">0 <span class="text-base font-normal text-slate-400">/ 294</span></p>
+          <p class="text-xs text-slate-400 mt-1">โมดูลแบบฟอร์ม (พร้อมเชื่อมต่อ)</p>
+        </div>
+
+        <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-200 border-l-4 border-l-sky-600">
+          <p class="text-sm text-slate-500 font-medium">เช็คชื่อประชุม Zoom</p>
+          <p class="text-3xl font-bold text-sky-700 mt-1">0 <span class="text-base font-normal text-slate-400">หน่วย</span></p>
+          <p class="text-xs text-slate-400 mt-1">โมดูลประชุมออนไลน์ (พร้อมเชื่อมต่อ)</p>
+        </div>
+      </div>
+
+      <!-- Region Summary Cards -->
+      <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
+          <h2 class="text-lg font-bold text-olive-900">สรุปยอดหน่วยฝึกและทหารใหม่ แยกรายกองทัพ / นขต.ทบ.</h2>
+          <span class="text-xs text-slate-500">คลิกที่การ์ดกองทัพเพื่อกรองรายชื่อหน่วยด้านล่าง</span>
+        </div>
+        <div id="region-cards" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+
+      <!-- Units Table -->
+      <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+        <div class="p-5 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h2 class="text-lg font-bold text-olive-900">ทำเนียบหน่วยฝึกทหารใหม่ (<span id="filtered-count">0</span> หน่วย)</h2>
+            <p class="text-xs text-slate-500">ข้อมูลจากฐานข้อมูลกลาง Neon PostgreSQL</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <input type="text" id="search-unit" placeholder="ค้นหารหัสหน่วย, ชื่อหน่วย, กองพล, จังหวัด..."
+              class="w-full sm:w-72 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-olive-600 outline-none" />
+          </div>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse">
+            <thead>
+              <tr class="bg-olive-50 text-olive-900 text-xs uppercase border-b border-slate-200">
+                <th class="py-3 px-4 font-bold">รหัส</th>
+                <th class="py-3 px-4 font-bold">หน่วยฝึก</th>
+                <th class="py-3 px-4 font-bold">กองพล / นขต.</th>
+                <th class="py-3 px-4 font-bold">สังกัด</th>
+                <th class="py-3 px-4 font-bold">ที่ตั้งหน่วย</th>
+                <th class="py-3 px-4 font-bold text-right">ยอดทหารใหม่</th>
+              </tr>
+            </thead>
+            <tbody id="units-tbody" class="divide-y divide-slate-100 text-sm">
+              <tr><td colspan="6" class="py-8 text-center text-slate-400">กำลังโหลดข้อมูลหน่วยฝึก...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <script>
+    let currentUser = null;
+    let currentBatch = null;
+    let allUnits = [];
+    let selectedRegion = 'ALL';
+
+    // Initialize on load
+    document.addEventListener('DOMContentLoaded', async () => {
+      await loadBatches();
+      const savedSession = localStorage.getItem('rtms_session');
+      if (savedSession) {
+        const parsed = JSON.parse(savedSession);
+        currentUser = parsed.user;
+        currentBatch = parsed.batch;
+        showDashboard();
+      }
+    });
+
+    async function loadBatches() {
+      try {
+        const res = await fetch('/api/batches');
+        const json = await res.json();
+        const select = document.getElementById('batch-select');
+        if (json.success && json.data.length > 0) {
+          select.innerHTML = json.data.map(b => 
+            `<option value="${b.batch_id}" ${b.is_current ? 'selected' : ''}>${b.batch_label} (ปีงบประมาณ ${b.fiscal_year})</option>`
+          ).join('');
+        } else {
+          select.innerHTML = '<option value="">ไม่พบข้อมูลรอบการฝึก</option>';
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('login-btn');
+      const errBox = document.getElementById('login-error');
+      errBox.classList.add('hidden');
+      btn.disabled = true;
+      btn.textContent = 'กำลังตรวจสอบสิทธิ์...';
+
+      try {
+        const res = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            phone_number: document.getElementById('phone-input').value,
+            pin: document.getElementById('pin-input').value,
+            batch_id: document.getElementById('batch-select').value
+          })
+        });
+        const json = await res.json();
+        if (json.success) {
+          currentUser = json.user;
+          currentBatch = json.batch;
+          localStorage.setItem('rtms_session', JSON.stringify({ user: currentUser, batch: currentBatch }));
+          showDashboard();
+        } else {
+          errBox.textContent = json.error || 'เข้าสู่ระบบไม่สำเร็จ';
+          errBox.classList.remove('hidden');
+        }
+      } catch (err) {
+        errBox.textContent = 'ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้ กรุณาตรวจสอบ DATABASE_URL';
+        errBox.classList.remove('hidden');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'เข้าสู่ระบบ';
+      }
+    });
+
+    function logout() {
+      localStorage.removeItem('rtms_session');
+      location.reload();
+    }
+
+    async function showDashboard() {
+      document.getElementById('login-view').classList.add('hidden');
+      document.getElementById('dashboard-view').classList.remove('hidden');
+
+      document.getElementById('nav-batch-badge').textContent = currentBatch ? currentBatch.batch_label : 'ไม่ระบุผลัด';
+      document.getElementById('user-fullname').textContent = `${currentUser.rank || ''}${currentUser.first_name} ${currentUser.last_name}`;
+      document.getElementById('user-role-unit').textContent = `${currentUser.position || currentUser.role} ${currentUser.unit_name ? '(' + currentUser.unit_name + ')' : '(ส่วนกลาง)'}`;
+
+      await loadDashboardData();
+    }
+
+    async function loadDashboardData() {
+      const batchId = currentBatch ? currentBatch.batch_id : 1;
+      const res = await fetch(`/api/dashboard?batch_id=${batchId}`);
+      const json = await res.json();
+
+      if (!json.success) return;
+
+      allUnits = json.units;
+      const summary = json.summary;
+
+      const totalUnits = summary.reduce((acc, r) => acc + r.unit_count, 0);
+      const totalRecruits = summary.reduce((acc, r) => acc + r.total_recruits, 0);
+
+      document.getElementById('kpi-total-units').textContent = totalUnits.toLocaleString();
+      document.getElementById('kpi-total-recruits').textContent = totalRecruits.toLocaleString();
+
+      // Render Region Filter Cards
+      const cardsContainer = document.getElementById('region-cards');
+      let cardsHtml = `
+        <button onclick="filterRegion('ALL')" class="region-btn text-left p-3 rounded-xl border-2 transition ${selectedRegion === 'ALL' ? 'border-olive-600 bg-olive-50' : 'border-slate-200 hover:border-olive-300'}">
+          <div class="text-xs font-bold text-olive-700">ทั้งหมด (ทบ.)</div>
+          <div class="text-lg font-bold text-slate-800 mt-0.5">${totalUnits} หน่วย</div>
+          <div class="text-xs text-slate-500">${totalRecruits.toLocaleString()} นาย</div>
+        </button>
+      `;
+
+      summary.forEach(r => {
+        const active = selectedRegion === r.region_command;
+        cardsHtml += `
+          <button onclick="filterRegion('${r.region_command}')" class="region-btn text-left p-3 rounded-xl border-2 transition ${active ? 'border-olive-600 bg-olive-50' : 'border-slate-200 hover:border-olive-300'}">
+            <div class="text-xs font-bold text-olive-700">${r.region_code} : ${r.region_command}</div>
+            <div class="text-lg font-bold text-slate-800 mt-0.5">${r.unit_count} หน่วย</div>
+            <div class="text-xs text-slate-500">${r.total_recruits.toLocaleString()} นาย</div>
+          </button>
+        `;
+      });
+      cardsContainer.innerHTML = cardsHtml;
+
+      renderUnitsTable();
+    }
+
+    function filterRegion(region) {
+      selectedRegion = region;
+      loadDashboardData();
+    }
+
+    document.getElementById('search-unit').addEventListener('input', renderUnitsTable);
+
+    function renderUnitsTable() {
+      const keyword = document.getElementById('search-unit').value.toLowerCase().trim();
+      const filtered = allUnits.filter(u => {
+        const matchRegion = selectedRegion === 'ALL' || u.region_command === selectedRegion;
+        const matchKeyword = !keyword || 
+          u.unit_code.toLowerCase().includes(keyword) ||
+          u.unit_name.toLowerCase().includes(keyword) ||
+          (u.division_name && u.division_name.toLowerCase().includes(keyword)) ||
+          (u.location && u.location.toLowerCase().includes(keyword));
+        return matchRegion && matchKeyword;
+      });
+
+      document.getElementById('filtered-count').textContent = filtered.length.toLocaleString();
+
+      const tbody = document.getElementById('units-tbody');
+      if (filtered.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="py-8 text-center text-slate-400">ไม่พบข้อมูลหน่วยฝึกที่ค้นหา</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = filtered.map(u => `
+        <tr class="hover:bg-olive-50/50 transition">
+          <td class="py-3 px-4 font-mono font-semibold text-olive-700">${u.unit_code}</td>
+          <td class="py-3 px-4 font-semibold text-slate-800">
+            ${u.unit_name}
+            ${u.attached_units ? `<div class="text-xs font-normal text-slate-400 mt-0.5">ฝากฝึก: ${u.attached_units}</div>` : ''}
+          </td>
+          <td class="py-3 px-4 text-slate-600">${u.division_name || '-'}</td>
+          <td class="py-3 px-4">
+            <span class="px-2 py-0.5 text-xs font-medium rounded bg-slate-100 text-slate-700 border border-slate-200">
+              ${u.region_command}
+            </span>
+          </td>
+          <td class="py-3 px-4 text-slate-600 text-xs">${u.location || '-'}</td>
+          <td class="py-3 px-4 text-right font-bold text-slate-800">${u.recruit_quota.toLocaleString()}</td>
+        </tr>
+      `).join('');
+    }
+  </script>
+</body>
+</html>
