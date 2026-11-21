@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>จัดการบัญชีผู้ใช้งาน - ระบบ RTMS / R-TRAIN</title>
+  <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: 'Sarabun', sans-serif; background-color: #f3f4f1; }
+    .olive-dark { background-color: #2d3822; }
+    .olive-main { background-color: #3f4e2f; }
+    .olive-hover:hover { background-color: #2f3b22; }
+    .gold-accent { color: #d4af37; }
+    .gold-border { border-color: #d4af37; }
+  </style>
+</head>
+<body class="text-slate-800">
+
+  <!-- Top Navbar -->
+  <header class="olive-dark text-white shadow-md border-b-4 gold-border">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-full bg-white/10 border border-amber-400/60 flex items-center justify-center font-bold text-amber-300">
+          RTMS
+        </div>
+        <div>
+          <h1 class="text-lg font-bold leading-tight">ระบบจัดการบัญชีผู้ใช้งานและสิทธิ์การเข้าถึง</h1>
+          <p class="text-xs text-amber-200/90">กตฝ.สกฝ.ยศ.ทบ. | บริหารจัดการเจ้าหน้าที่ 294 หน่วยฝึก และ 22 หน่วยบังคับบัญชา</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <a href="/index.html" class="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-sm transition">
+          ← กลับหน้าหลัก Dashboard
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
+
+    <!-- Summary Cards -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div class="bg-white rounded-xl p-4 shadow-sm border-l-4 border-[#3f4e2f]">
+        <div class="text-xs text-slate-500 font-medium">ผู้ใช้งานทั้งหมดในระบบ</div>
+        <div id="stat-total" class="text-2xl font-bold text-slate-800 mt-1">0</div>
+      </div>
+      <div class="bg-white rounded-xl p-4 shadow-sm border-l-4 border-amber-500">
+        <div class="text-xs text-slate-500 font-medium">ส่วนกลาง / ผู้ดูแลระบบ (Admin)</div>
+        <div id="stat-admin" class="text-2xl font-bold text-amber-700 mt-1">0</div>
+      </div>
+      <div class="bg-white rounded-xl p-4 shadow-sm border-l-4 border-blue-600">
+        <div class="text-xs text-slate-500 font-medium">หน่วยบังคับบัญชา (ทภ./นขต.ทบ.)</div>
+        <div id="stat-command" class="text-2xl font-bold text-blue-700 mt-1">0</div>
+      </div>
+      <div class="bg-white rounded-xl p-4 shadow-sm border-l-4 border-emerald-600">
+        <div class="text-xs text-slate-500 font-medium">เจ้าหน้าที่หน่วยฝึก (294 หน่วย)</div>
+        <div id="stat-unit" class="text-2xl font-bold text-emerald-700 mt-1">0</div>
+      </div>
+    </div>
+
+    <!-- Action & Filter Toolbar -->
+    <div class="bg-white rounded-xl p-4 shadow-sm space-y-4">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="flex flex-wrap items-center gap-2">
+          <button onclick="openUserModal()" class="olive-main olive-hover text-white px-4 py-2 rounded-lg text-sm font-semibold shadow-sm transition">
+            + เพิ่มผู้ใช้งานใหม่
+          </button>
+          <button onclick="openBulkModal()" class="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg text-sm font-semibold shadow-sm transition">
+            นำเข้าข้อมูลจำนวนมาก (Excel / Copy-Paste)
+          </button>
+        </div>
+        <button onclick="loadData()" class="px-3 py-2 rounded-lg border border-slate-300 hover:bg-slate-50 text-sm">
+          รีเฟรชข้อมูล
+        </button>
+      </div>
+
+      <!-- Search & Filters -->
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-3 pt-2 border-t border-slate-100">
+        <div class="md:col-span-2">
+          <input type="text" id="filter-search" oninput="renderTable()" placeholder="ค้นหาชื่อ-สกุล, เบอร์โทรศัพท์, หรือชื่อหน่วยฝึก..." class="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm focus:outline-none focus:border-[#3f4e2f]" />
+        </div>
+        <div>
+          <select id="filter-region" onchange="renderTable()" class="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white">
+            <option value="">ทุกกองทัพภาค / นขต.ทบ.</option>
+            <option value="ทภ.1">ทภ.1</option>
+            <option value="ทภ.2">ทภ.2</option>
+            <option value="ทภ.3">ทภ.3</option>
+            <option value="ทภ.4">ทภ.4</option>
+            <option value="นขต.ทบ.">นขต.ทบ.</option>
+            <option value="ส่วนกลาง">ส่วนกลาง (ยศ.ทบ.)</option>
+          </select>
+        </div>
+        <div>
+          <select id="filter-role" onchange="renderTable()" class="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white">
+            <option value="">ทุกระดับสิทธิ์ (All Roles)</option>
+            <option value="admin">แอดมินส่วนกลาง (Admin)</option>
+            <option value="command">หน่วยบังคับบัญชา (Command)</option>
+            <option value="unit">เจ้าหน้าที่หน่วยฝึก (Unit)</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Users Table -->
+    <div class="bg-white rounded-xl shadow-sm overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="w-full text-left border-collapse">
+          <thead>
+            <tr class="olive-dark text-white text-xs uppercase">
+              <th class="py-3 px-4">ยศ - ชื่อ - สกุล</th>
+              <th class="py-3 px-4">เบอร์โทร (Username)</th>
+              <th class="py-3 px-4">ระดับสิทธิ์</th>
+              <th class="py-3 px-4">กองทัพภาค / หน่วยฝึก</th>
+              <th class="py-3 px-4 text-center">สถานะ</th>
+              <th class="py-3 px-4 text-right">จัดการ</th>
+            </tr>
+          </thead>
+          <tbody id="users-tbody" class="divide-y divide-slate-200 text-sm">
+            <tr>
+              <td colspan="6" class="py-8 text-center text-slate-400">กำลังโหลดข้อมูลผู้ใช้งาน...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Modal: เพิ่ม / แก้ไข ผู้ใช้งาน -->
+  <div id="user-modal" class="fixed inset-0 bg-black/50 hidden items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl space-y-4">
+      <div class="flex items-center justify-between border-b pb-3">
+        <h2 id="modal-title" class="text-lg font-bold text-[#2d3822]">เพิ่มผู้ใช้งานใหม่</h2>
+        <button onclick="closeUserModal()" class="text-slate-400 hover:text-slate-600 text-xl">&times;</button>
+      </div>
+
+      <form id="user-form" onsubmit="saveUser(event)" class="space-y-3">
+        <input type="hidden" id="form-id" />
+
+        <div class="grid grid-cols-3 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">ยศ / คำนำหน้า</label>
+            <input type="text" id="form-rank" placeholder="เช่น จ.ส.อ., ร.อ." class="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm" />
+          </div>
+          <div class="col-span-2">
+            <label class="block text-xs font-semibold text-slate-600 mb-1">ชื่อ - นามสกุล *</label>
+            <input type="text" id="form-fullname" required placeholder="กรอกชื่อและนามสกุล" class="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm" />
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">เบอร์โทรศัพท์ (Username) *</label>
+            <input type="text" id="form-phone" required maxlength="10" placeholder="08XXXXXXXX" class="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm" />
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">รหัส PIN 6 หลัก</label>
+            <input type="text" id="form-pin" maxlength="6" placeholder="ค่าเริ่มต้น 123456" class="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm" />
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">ระดับสิทธิ์การใช้งาน *</label>
+            <select id="form-role" class="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white">
+              <option value="unit">เจ้าหน้าที่หน่วยฝึก (Unit)</option>
+              <option value="command">หน่วยบังคับบัญชา (Command)</option>
+              <option value="admin">แอดมินส่วนกลาง (Admin)</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">สังกัดกองทัพภาค / นขต.</label>
+            <select id="form-region" onchange="filterModalUnits()" class="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white">
+              <option value="">-- เลือกสังกัด --</option>
+              <option value="ทภ.1">ทภ.1</option>
+              <option value="ทภ.2">ทภ.2</option>
+              <option value="ทภ.3">ทภ.3</option>
+              <option value="ทภ.4">ทภ.4</option>
+              <option value="นขต.ทบ.">นขต.ทบ.</option>
+              <option value="ส่วนกลาง">ส่วนกลาง (ยศ.ทบ.)</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">หน่วยฝึก / หน่วยรับผิดชอบ (294 หน่วย)</label>
+          <select id="form-unit" class="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white">
+            <option value="">-- ไม่ระบุ / ส่วนกลาง --</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">ตำแหน่ง</label>
+          <input type="text" id="form-position" placeholder="เช่น เสมียนธุรการ, ผบ.ร้อย.ฝฯ" class="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm" />
+        </div>
+
+        <div class="flex justify-end gap-2 pt-3 border-t">
+          <button type="button" onclick="closeUserModal()" class="px-4 py-2 rounded-lg border border-slate-300 text-sm">ยกเลิก</button>
+          <button type="submit" class="olive-main olive-hover text-white px-5 py-2 rounded-lg text-sm font-semibold">บันทึกข้อมูล</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: นำเข้าข้อมูลจำนวนมาก (Bulk Import) -->
+  <div id="bulk-modal" class="fixed inset-0 bg-black/50 hidden items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-xl space-y-4">
+      <div class="flex items-center justify-between border-b pb-3">
+        <h2 class="text-lg font-bold text-[#2d3822]">นำเข้าบัญชีผู้ใช้งานจำนวนมาก (Bulk Import)</h2>
+        <button onclick="closeBulkModal()" class="text-slate-400 hover:text-slate-600 text-xl">&times;</button>
+      </div>
+
+      <p class="text-xs text-slate-600 leading-relaxed">
+        คัดลอกข้อมูลจาก Excel หรือพิมพ์ข้อมูล 1 คนต่อ 1 บรรทัด คั่นด้วยเครื่องหมายจุลภาค (<b>,</b>) หรือ Tab ตามลำดับ:<br>
+        <code class="bg-slate-100 px-2 py-0.5 rounded text-emerald-800">เบอร์โทร, ยศ, ชื่อ-สกุล, กองทัพภาค, ชื่อหน่วยฝึก, สิทธิ์(unit/command/admin), PIN</code><br>
+        ตัวอย่าง: <code>0812345678, จ.ส.อ., สมชาย ใจดี, ทภ.1, ร.1 พัน.1 รอ., unit, 123456</code>
+      </p>
+
+      <textarea id="bulk-text" rows="8" placeholder="วางข้อมูลรายชื่อเจ้าหน้าที่ที่นี่..." class="w-full p-3 rounded-lg border border-slate-300 text-xs font-mono focus:outline-none focus:border-[#3f4e2f]"></textarea>
+
+      <div class="flex justify-end gap-2 pt-2 border-t">
+        <button type="button" onclick="closeBulkModal()" class="px-4 py-2 rounded-lg border border-slate-300 text-sm">ยกเลิก</button>
+        <button type="button" onclick="submitBulkImport()" class="bg-amber-600 hover:bg-amber-700 text-white px-5 py-2 rounded-lg text-sm font-semibold">เริ่มนำเข้าข้อมูล</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let allUsers = [];
+    let allUnits = [];
+
+    // ตรวจสอบสิทธิ์การเข้าถึงเบื้องต้น
+    const currentUser = JSON.parse(localStorage.getItem('rtms_user') || 'null');
+    if (!currentUser) {
+      window.location.href = '/index.html';
+    }
+
+    async function loadData() {
+      try {
+        const [uRes, unitRes] = await Promise.all([
+          fetch('/api/users'),
+          fetch('/api/users?mode=units')
+        ]);
+        const uData = await uRes.json();
+        const unitData = await unitRes.json();
+
+        if (uData.success) allUsers = uData.users;
+        if (unitData.success) allUnits = unitData.units;
+
+        updateStats();
+        renderTable();
+        populateUnitDropdown(allUnits);
+      } catch (e) {
+        alert('เกิดข้อผิดพลาดในการโหลดข้อมูล: ' + e.message);
+      }
+    }
+
+    function updateStats() {
+      document.getElementById('stat-total').textContent = allUsers.length.toLocaleString();
+      document.getElementById('stat-admin').textContent = allUsers.filter(u => u.role === 'admin').length.toLocaleString();
+      document.getElementById('stat-command').textContent = allUsers.filter(u => u.role === 'command').length.toLocaleString();
+      document.getElementById('stat-unit').textContent = allUsers.filter(u => u.role === 'unit').length.toLocaleString();
+    }
+
+    function renderTable() {
+      const q = document.getElementById('filter-search').value.toLowerCase().trim();
+      const region = document.getElementById('filter-region').value;
+      const role = document.getElementById('filter-role').value;
+
+      const filtered = allUsers.filter(u => {
+        const matchText = !q ||
+          (u.full_name || '').toLowerCase().includes(q) ||
+          (u.phone || '').includes(q) ||
+          (u.unit_name || '').toLowerCase().includes(q) ||
+          (u.rank || '').toLowerCase().includes(q);
+        const matchRegion = !region || u.army_region === region;
+        const matchRole = !role || u.role === role;
+        return matchText && matchRegion && matchRole;
+      });
+
+      const tbody = document.getElementById('users-tbody');
+      if (filtered.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="py-8 text-center text-slate-400">ไม่พบข้อมูลผู้ใช้งานตามเงื่อนไขที่ค้นหา</td></tr>';
+        return;
+      }
+
+      const roleBadge = {
+        admin: '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800">Admin ส่วนกลาง</span>',
+        command: '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800">หน่วยบังคับบัญชา</span>',
+        unit: '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">เจ้าหน้าที่หน่วยฝึก</span>'
+      };
+
+      tbody.innerHTML = filtered.map(u => `
+        <tr class="hover:bg-slate-50 transition">
+          <td class="py-3 px-4 font-medium text-slate-800">
+            ${u.rank ? u.rank + ' ' : ''}${u.full_name}
+            ${u.position ? `<div class="text-xs text-slate-400">${u.position}</div>` : ''}
+          </td>
+          <td class="py-3 px-4 font-mono text-slate-700">${u.phone}</td>
+          <td class="py-3 px-4">${roleBadge[u.role] || u.role}</td>
+          <td class="py-3 px-4">
+            <span class="font-semibold text-slate-700">${u.army_region || '-'}</span>
+            <div class="text-xs text-slate-500">${u.unit_name || 'ส่วนกลาง'}</div>
+          </td>
+          <td class="py-3 px-4 text-center">
+            <button onclick="toggleStatus(${u.id}, ${!u.is_active})" class="px-2.5 py-0.5 rounded-full text-xs font-semibold ${u.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">
+              ${u.is_active ? 'ใช้งานปกติ' : 'ระงับสิทธิ์'}
+            </button>
+          </td>
+          <td class="py-3 px-4 text-right space-x-1 whitespace-nowrap">
+            <button onclick="resetPin(${u.id}, '${u.full_name}')" class="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 text-xs text-slate-700">รีเซ็ต PIN</button>
+            <button onclick='editUser(${JSON.stringify(u)})' class="px-2 py-1 rounded bg-amber-50 hover:bg-amber-100 text-xs text-amber-800 font-medium">แก้ไข</button>
+            ${u.phone !== '0800000000' ? `<button onclick="deleteUser(${u.id}, '${u.full_name}')" class="px-2 py-1 rounded bg-red-50 hover:bg-red-100 text-xs text-red-700">ลบ</button>` : ''}
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    function populateUnitDropdown(unitsList) {
+      const sel = document.getElementById('form-unit');
+      sel.innerHTML = '<option value="">-- ไม่ระบุ / ส่วนกลาง --</option>' +
+        unitsList.map(un => `<option value="${un.id}">[${un.army_region}] ${un.unit_name}</option>`).join('');
+    }
+
+    function filterModalUnits() {
+      const region = document.getElementById('form-region').value;
+      if (!region || region === 'ส่วนกลาง') {
+        populateUnitDropdown(allUnits);
+      } else {
+        populateUnitDropdown(allUnits.filter(u => u.army_region === region));
+      }
+    }
+
+    function openUserModal() {
+      document.getElementById('modal-title').textContent = 'เพิ่มผู้ใช้งานใหม่';
+      document.getElementById('user-form').reset();
+      document.getElementById('form-id').value = '';
+      document.getElementById('form-pin').value = '123456';
+      populateUnitDropdown(allUnits);
+      document.getElementById('user-modal').classList.remove('hidden');
+      document.getElementById('user-modal').classList.add('flex');
+    }
+
+    function editUser(u) {
+      document.getElementById('modal-title').textContent = 'แก้ไขข้อมูลผู้ใช้งาน';
+      document.getElementById('form-id').value = u.id;
+      document.getElementById('form-rank').value = u.rank || '';
+      document.getElementById('form-fullname').value = u.full_name || '';
+      document.getElementById('form-phone').value = u.phone || '';
+      document.getElementById('form-pin').value = '';
+      document.getElementById('form-pin').placeholder = 'เว้นว่างไว้หากไม่เปลี่ยน PIN';
+      document.getElementById('form-role').value = u.role || 'unit';
+      document.getElementById('form-region').value = u.army_region || '';
+      filterModalUnits();
+      document.getElementById('form-unit').value = u.unit_id || '';
+      document.getElementById('form-position').value = u.position || '';
+
+      document.getElementById('user-modal').classList.remove('hidden');
+      document.getElementById('user-modal').classList.add('flex');
+    }
+
+    function closeUserModal() {
+      document.getElementById('user-modal').classList.add('hidden');
+      document.getElementById('user-modal').classList.remove('flex');
+    }
+
+    async function saveUser(e) {
+      e.preventDefault();
+      const id = document.getElementById('form-id').value;
+      const payload = {
+        id: id || undefined,
+        rank: document.getElementById('form-rank').value.trim(),
+        full_name: document.getElementById('form-fullname').value.trim(),
+        phone: document.getElementById('form-phone').value.trim(),
+        pin: document.getElementById('form-pin').value.trim(),
+        role: document.getElementById('form-role').value,
+        army_region: document.getElementById('form-region').value,
+        unit_id: document.getElementById('form-unit').value || null,
+        position: document.getElementById('form-position').value.trim()
+      };
+
+      const res = await fetch('/api/users', {
+        method: id ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (data.success) {
+        closeUserModal();
+        loadData();
+      } else {
+        alert(data.error || 'บันทึกข้อมูลไม่สำเร็จ');
+      }
+    }
+
+    async function resetPin(id, name) {
+      if (!confirm(`ต้องการรีเซ็ต PIN ของ "${name}" กลับเป็น 123456 ใช่หรือไม่?`)) return;
+      const res = await fetch('/api/users', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, action: 'reset_pin', pin: '123456' })
+      });
+      const data = await res.json();
+      if (data.success) alert('รีเซ็ต PIN เป็น 123456 เรียบร้อยแล้ว');
+    }
+
+    async function toggleStatus(id, newStatus) {
+      const res = await fetch('/api/users', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, action: 'toggle_status', is_active: newStatus })
+      });
+      const data = await res.json();
+      if (data.success) loadData();
+    }
+
+    async function deleteUser(id, name) {
+      if (!confirm(`ยืนยันการลบบัญชีผู้ใช้งาน "${name}" ออกจากระบบ?`)) return;
+      const res = await fetch(`/api/users?id=${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) loadData();
+      else alert(data.error || 'ลบข้อมูลไม่สำเร็จ');
+    }
+
+    function openBulkModal() {
+      document.getElementById('bulk-text').value = '';
+      document.getElementById('bulk-modal').classList.remove('hidden');
+      document.getElementById('bulk-modal').classList.add('flex');
+    }
+
+    function closeBulkModal() {
+      document.getElementById('bulk-modal').classList.add('hidden');
+      document.getElementById('bulk-modal').classList.remove('flex');
+    }
+
+    async function submitBulkImport() {
+      const raw = document.getElementById('bulk-text').value.trim();
+      if (!raw) return alert('กรุณาวางข้อมูลรายชื่อก่อนกดนำเข้า');
+
+      const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
+      const records = lines.map(line => {
+        const parts = line.includes('\t') ? line.split('\t') : line.split(',');
+        const [phone, rank, full_name, army_region, unitName, role, pin] = parts.map(s => (s || '').trim());
+        const matchedUnit = allUnits.find(u => u.unit_name === unitName || u.unit_code === unitName);
+        return {
+          phone,
+          rank,
+          full_name,
+          army_region,
+          unit_id: matchedUnit ? matchedUnit.id : null,
+          role: ['admin', 'command', 'unit'].includes(role) ? role : 'unit',
+          pin: pin || '123456'
+        };
+      });
+
+      const res = await fetch('/api/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'bulk_import', records })
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert(`นำเข้าข้อมูลสำเร็จ! เพิ่มใหม่ ${data.importedCount} รายการ, อัปเดต ${data.updatedCount} รายการ`);
+        closeBulkModal();
+        loadData();
+      } else {
+        alert(data.error || 'นำเข้าข้อมูลไม่สำเร็จ');
+      }
+    }
+
+    loadData();
+  </script>
+</body>
+</html>
