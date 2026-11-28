@@ -18,25 +18,37 @@ export async function onRequest(context) {
   }
 
   try {
-    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT`;
-    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number TEXT`;
-    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS pin TEXT DEFAULT '123456'`;
-    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS rank TEXT DEFAULT ''`;
-    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS name_surname TEXT DEFAULT ''`;
-    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'unit'`;
-    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS army_region TEXT DEFAULT ''`;
-    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS unit_name TEXT DEFAULT ''`;
-    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true`;
-
     const colsInfo = await sql`
-      SELECT column_name, is_nullable, data_type
+      SELECT column_name, data_type, is_nullable, column_default
       FROM information_schema.columns
       WHERE table_schema = 'public' AND table_name = 'users'
     `;
-    const colNames = new Set(colsInfo.map(c => c.column_name));
-    const notNullCols = colsInfo.filter(c => c.is_nullable === 'NO');
+    const colMap = new Map(colsInfo.map(c => [c.column_name, c]));
 
-    const phoneCols = ['phone', 'phone_number', 'username', 'tel', 'mobile', 'user_phone'].filter(c => colNames.has(c));
+    const ensureCol = async (name, ddlSuffix) => {
+      if (!colMap.has(name)) {
+        await sql.unsafe(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ${name} ${ddlSuffix}`);
+        const added = await sql`
+          SELECT column_name, data_type, is_nullable, column_default
+          FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = 'users' AND column_name = ${name}
+        `;
+        if (added[0]) colMap.set(name, added[0]);
+      }
+    };
+
+    await ensureCol('phone', 'TEXT');
+    await ensureCol('pin', "TEXT DEFAULT '123456'");
+    await ensureCol('rank', "TEXT DEFAULT ''");
+    await ensureCol('name_surname', "TEXT DEFAULT ''");
+    await ensureCol('role', "TEXT DEFAULT 'unit'");
+    await ensureCol('army_region', "TEXT DEFAULT ''");
+    await ensureCol('unit_name', "TEXT DEFAULT ''");
+    await ensureCol('is_active', 'BOOLEAN DEFAULT true');
+
+    const phoneCols = ['phone', 'phone_number', 'username', 'tel', 'mobile', 'user_phone'].filter(c => colMap.has(c));
+    const pinCols = ['pin_hash', 'pin', 'password', 'passcode', 'user_pin'].filter(c => colMap.has(c));
+
     const getPhoneVal = (row) => {
       for (const c of phoneCols) {
         if (row[c] !== undefined && row[c] !== null && String(row[c]).trim() !== '') {
@@ -46,44 +58,129 @@ export async function onRequest(context) {
       return '';
     };
 
-    const syncAllPhoneCols = async (targetPhone) => {
-      if (colNames.has('phone')) {
-        await sql`UPDATE users SET phone = ${targetPhone} WHERE phone = ${targetPhone} OR phone_number = ${targetPhone}`;
-      }
-      if (colNames.has('phone_number')) {
-        await sql`UPDATE users SET phone_number = ${targetPhone} WHERE phone_number = ${targetPhone} OR phone = ${targetPhone}`;
-      }
-    };
-
-    const findRowByPhone = async (cleanPhone) => {
-      const allRows = await sql`SELECT * FROM users`;
-      return allRows.find(r => getPhoneVal(r).replace(/[^0-9]/g, '') === cleanPhone) || null;
-    };
-
-    const fillAnyMissingNotNull = async (cleanPhone, defaultMap = {}) => {
-      for (const col of notNullCols) {
-        const name = col.column_name;
-        if (phoneCols.includes(name)) continue;
-        const fallback = defaultMap[name] !== undefined
-          ? defaultMap[name]
-          : (col.data_type === 'boolean' ? true : (col.data_type.includes('int') || col.data_type === 'numeric' ? 0 : ''));
-
-        if (name === 'pin' && colNames.has('pin')) {
-          await sql`UPDATE users SET pin = COALESCE(pin, ${String(fallback)}) WHERE phone = ${cleanPhone} OR phone_number = ${cleanPhone}`;
-        } else if (name === 'role' && colNames.has('role')) {
-          await sql`UPDATE users SET role = COALESCE(role, ${String(fallback)}) WHERE phone = ${cleanPhone} OR phone_number = ${cleanPhone}`;
-        } else if (name === 'name_surname' && colNames.has('name_surname')) {
-          await sql`UPDATE users SET name_surname = COALESCE(name_surname, ${String(fallback)}) WHERE phone = ${cleanPhone} OR phone_number = ${cleanPhone}`;
-        } else if (name === 'full_name' && colNames.has('full_name')) {
-          await sql`UPDATE users SET full_name = COALESCE(full_name, ${String(fallback)}) WHERE phone = ${cleanPhone} OR phone_number = ${cleanPhone}`;
-        } else if (name === 'rank' && colNames.has('rank')) {
-          await sql`UPDATE users SET rank = COALESCE(rank, ${String(fallback)}) WHERE phone = ${cleanPhone} OR phone_number = ${cleanPhone}`;
-        } else if (name === 'army_region' && colNames.has('army_region')) {
-          await sql`UPDATE users SET army_region = COALESCE(army_region, ${String(fallback)}) WHERE phone = ${cleanPhone} OR phone_number = ${cleanPhone}`;
-        } else if (name === 'unit_name' && colNames.has('unit_name')) {
-          await sql`UPDATE users SET unit_name = COALESCE(unit_name, ${String(fallback)}) WHERE phone = ${cleanPhone} OR phone_number = ${cleanPhone}`;
+    const getPinVal = (row) => {
+      for (const c of ['pin', 'pin_hash', 'password', 'passcode', 'user_pin']) {
+        if (colMap.has(c) && row[c] !== undefined && row[c] !== null && String(row[c]).trim() !== '') {
+          return String(row[c]).trim();
         }
       }
+      return '123456';
+    };
+
+    const fallbackForCol = (colName, data) => {
+      const meta = colMap.get(colName);
+      if (data[colName] !== undefined && data[colName] !== null && String(data[colName]) !== '') {
+        return data[colName];
+      }
+      if (!meta) return '';
+      if (meta.data_type === 'boolean') return true;
+      if (
+        meta.data_type.includes('int') ||
+        meta.data_type === 'numeric' ||
+        meta.data_type === 'real' ||
+        meta.data_type === 'double precision'
+      ) {
+        return 0;
+      }
+      if (meta.data_type.includes('timestamp') || meta.data_type === 'date') {
+        return new Date().toISOString();
+      }
+      return '';
+    };
+
+    const buildRecordPayload = (raw) => {
+      const cleanPhone = String(raw.phone || raw.phone_number || raw.id || '').replace(/[^0-9]/g, '');
+      const pinVal = String(raw.pin || raw.pin_hash || '123456').trim() || '123456';
+      const roleVal = ['admin', 'command', 'unit'].includes(raw.role) ? raw.role : 'unit';
+
+      let cleanRegion = String(raw.army_region || '').trim();
+      if (cleanRegion.includes(':')) {
+        cleanRegion = cleanRegion.split(':').pop().trim();
+      }
+
+      const unitVal = String(raw.raw_unit || raw.unit_name || '').trim();
+      const rankVal = String(raw.rank || '').trim();
+      const nameVal = String(raw.name_surname || raw.full_name || '').trim();
+
+      const payload = {
+        phone: cleanPhone,
+        phone_number: cleanPhone,
+        username: cleanPhone,
+        pin: pinVal,
+        pin_hash: pinVal,
+        password: pinVal,
+        rank: rankVal,
+        name_surname: nameVal,
+        full_name: nameVal,
+        role: roleVal,
+        army_region: cleanRegion,
+        unit_name: unitVal,
+        is_active: raw.is_active !== undefined ? Boolean(raw.is_active) : true
+      };
+
+      for (const [colName, meta] of colMap.entries()) {
+        if (payload[colName] !== undefined) continue;
+        if (meta.is_nullable === 'NO' && !meta.column_default) {
+          payload[colName] = fallbackForCol(colName, raw);
+        }
+      }
+
+      return { cleanPhone, pinVal, payload };
+    };
+
+    const insertUserRow = async (payload) => {
+      const cols = [];
+      const vals = [];
+      for (const [colName, meta] of colMap.entries()) {
+        if (colName === 'id' && meta.column_default) continue;
+        if (payload[colName] !== undefined) {
+          cols.push(colName);
+          vals.push(payload[colName]);
+        } else if (meta.is_nullable === 'NO' && !meta.column_default) {
+          cols.push(colName);
+          vals.push(fallbackForCol(colName, payload));
+        }
+      }
+      const placeholders = vals.map((_, i) => `$${i + 1}`).join(', ');
+      await sql.unsafe(
+        `INSERT INTO users (${cols.join(', ')}) VALUES (${placeholders})`,
+        vals
+      );
+    };
+
+    const updateUserByPhone = async (cleanPhone, fieldsToUpdate) => {
+      const setClauses = [];
+      const vals = [];
+      let idx = 1;
+
+      for (const [colName, val] of Object.entries(fieldsToUpdate)) {
+        if (colMap.has(colName) && val !== undefined) {
+          setClauses.push(`${colName} = $${idx++}`);
+          vals.push(val);
+        }
+      }
+
+      for (const [colName, meta] of colMap.entries()) {
+        if (fieldsToUpdate[colName] === undefined && meta.is_nullable === 'NO' && !meta.column_default) {
+          setClauses.push(`${colName} = COALESCE(${colName}, $${idx++})`);
+          vals.push(fallbackForCol(colName, fieldsToUpdate));
+        }
+      }
+
+      if (setClauses.length === 0) return;
+
+      const whereConds = phoneCols.map(c => `regexp_replace(COALESCE(${c}::text, ''), '[^0-9]', '', 'g') = $${idx}`);
+      vals.push(cleanPhone);
+
+      await sql.unsafe(
+        `UPDATE users SET ${setClauses.join(', ')} WHERE ${whereConds.join(' OR ')}`,
+        vals
+      );
+    };
+
+    const findMatchingPhones = async (cleanPhone) => {
+      const allRows = await sql`SELECT * FROM users`;
+      return allRows.filter(r => getPhoneVal(r).replace(/[^0-9]/g, '') === cleanPhone);
     };
 
     // 1. GET: ดึงรายชื่อผู้ใช้งานทั้งหมด
@@ -100,7 +197,7 @@ export async function onRequest(context) {
           ...u,
           phone: pVal,
           phone_number: pVal,
-          pin: String(u.pin || u.password || '123456'),
+          pin: getPinVal(u),
           rank: u.rank || '',
           name_surname: u.name_surname || u.full_name || '',
           role: u.role || 'unit',
@@ -135,59 +232,14 @@ export async function onRequest(context) {
         let updatedCount = 0;
 
         for (const item of body.records) {
-          const cleanPhone = String(item.phone || item.phone_number || '').replace(/[^0-9]/g, '');
+          const { cleanPhone, payload } = buildRecordPayload(item);
           if (cleanPhone.length < 9) continue;
 
-          const pin = String(item.pin || '123456').trim() || '123456';
-          const role = ['admin', 'command', 'unit'].includes(item.role) ? item.role : 'unit';
-
-          let cleanRegion = String(item.army_region || '').trim();
-          if (cleanRegion.includes(':')) {
-            cleanRegion = cleanRegion.split(':').pop().trim();
-          }
-
-          const rawUnit = String(item.raw_unit || item.unit_name || '').trim();
-          const rankVal = String(item.rank || '').trim();
-          const nameVal = String(item.name_surname || '').trim();
-
           if (existingPhones.has(cleanPhone)) {
-            await sql`
-              UPDATE users
-              SET phone = ${cleanPhone},
-                  phone_number = ${cleanPhone},
-                  pin = ${pin},
-                  rank = ${rankVal},
-                  name_surname = ${nameVal},
-                  role = ${role},
-                  army_region = ${cleanRegion},
-                  unit_name = ${rawUnit},
-                  is_active = true
-              WHERE phone = ${cleanPhone} OR phone_number = ${cleanPhone}
-            `;
-            await fillAnyMissingNotNull(cleanPhone, {
-              pin,
-              rank: rankVal,
-              name_surname: nameVal,
-              full_name: nameVal,
-              role,
-              army_region: cleanRegion,
-              unit_name: rawUnit
-            });
+            await updateUserByPhone(cleanPhone, payload);
             updatedCount++;
           } else {
-            await sql`
-              INSERT INTO users (phone, phone_number, pin, rank, name_surname, role, army_region, unit_name, is_active)
-              VALUES (${cleanPhone}, ${cleanPhone}, ${pin}, ${rankVal}, ${nameVal}, ${role}, ${cleanRegion}, ${rawUnit}, true)
-            `;
-            await fillAnyMissingNotNull(cleanPhone, {
-              pin,
-              rank: rankVal,
-              name_surname: nameVal,
-              full_name: nameVal,
-              role,
-              army_region: cleanRegion,
-              unit_name: rawUnit
-            });
+            await insertUserRow(payload);
             existingPhones.add(cleanPhone);
             importedCount++;
           }
@@ -199,117 +251,67 @@ export async function onRequest(context) {
         );
       }
 
-      const cleanPhone = String(body.phone || body.phone_number || '').replace(/[^0-9]/g, '');
-      if (!cleanPhone || !body.name_surname) {
+      const { cleanPhone, payload } = buildRecordPayload(body);
+      if (!cleanPhone || !payload.name_surname) {
         return new Response(
           JSON.stringify({ success: false, error: 'กรุณากรอกเบอร์โทรศัพท์และชื่อ-สกุลให้ครบถ้วน' }),
           { status: 400, headers }
         );
       }
 
-      const dup = await findRowByPhone(cleanPhone);
-      if (dup) {
+      const dupRows = await findMatchingPhones(cleanPhone);
+      if (dupRows.length > 0) {
         return new Response(
           JSON.stringify({ success: false, error: 'เบอร์โทรศัพท์นี้มีอยู่ในระบบแล้ว' }),
           { status: 400, headers }
         );
       }
 
-      const pin = String(body.pin || '123456').trim() || '123456';
-      await sql`
-        INSERT INTO users (phone, phone_number, pin, rank, name_surname, role, army_region, unit_name, is_active)
-        VALUES (
-          ${cleanPhone},
-          ${cleanPhone},
-          ${pin},
-          ${body.rank || ''},
-          ${body.name_surname || ''},
-          ${body.role || 'unit'},
-          ${body.army_region || ''},
-          ${body.unit_name || ''},
-          true
-        )
-      `;
-      await fillAnyMissingNotNull(cleanPhone, {
-        pin,
-        rank: body.rank || '',
-        name_surname: body.name_surname || '',
-        full_name: body.name_surname || '',
-        role: body.role || 'unit',
-        army_region: body.army_region || '',
-        unit_name: body.unit_name || ''
-      });
-
+      await insertUserRow(payload);
       return new Response(JSON.stringify({ success: true }), { headers });
     }
 
     // 3. PUT: แก้ไขข้อมูล / รีเซ็ต PIN / เปิด-ปิดสถานะ
     if (method === 'PUT') {
       const body = await request.json();
-      const targetPhone = String(body.phone || body.phone_number || body.id || '').replace(/[^0-9]/g, '');
-      if (!targetPhone) {
+      const { cleanPhone, pinVal, payload } = buildRecordPayload(body);
+      if (!cleanPhone) {
         return new Response(JSON.stringify({ success: false, error: 'ไม่พบเบอร์โทรศัพท์อ้างอิง' }), { status: 400, headers });
       }
 
-      await syncAllPhoneCols(targetPhone);
-
       if (body.action === 'reset_pin') {
-        await sql`
-          UPDATE users
-          SET pin = ${String(body.pin || '123456').trim()}
-          WHERE phone = ${targetPhone} OR phone_number = ${targetPhone}
-        `;
+        const pinUpdate = {};
+        for (const c of pinCols) pinUpdate[c] = pinVal;
+        await updateUserByPhone(cleanPhone, pinUpdate);
         return new Response(JSON.stringify({ success: true }), { headers });
       }
 
       if (body.action === 'toggle_status') {
-        await sql`
-          UPDATE users
-          SET is_active = ${Boolean(body.is_active)}
-          WHERE phone = ${targetPhone} OR phone_number = ${targetPhone}
-        `;
+        await updateUserByPhone(cleanPhone, { is_active: Boolean(body.is_active) });
         return new Response(JSON.stringify({ success: true }), { headers });
       }
 
-      if (body.pin && String(body.pin).trim() !== '') {
-        await sql`
-          UPDATE users
-          SET phone = ${targetPhone},
-              phone_number = ${targetPhone},
-              pin = ${String(body.pin).trim()},
-              rank = ${body.rank || ''},
-              name_surname = ${body.name_surname || ''},
-              role = ${body.role || 'unit'},
-              army_region = ${body.army_region || ''},
-              unit_name = ${body.unit_name || ''}
-          WHERE phone = ${targetPhone} OR phone_number = ${targetPhone}
-        `;
-      } else {
-        await sql`
-          UPDATE users
-          SET phone = ${targetPhone},
-              phone_number = ${targetPhone},
-              rank = ${body.rank || ''},
-              name_surname = ${body.name_surname || ''},
-              role = ${body.role || 'unit'},
-              army_region = ${body.army_region || ''},
-              unit_name = ${body.unit_name || ''}
-          WHERE phone = ${targetPhone} OR phone_number = ${targetPhone}
-        `;
+      const updateData = { ...payload };
+      if (!body.pin && !body.pin_hash) {
+        for (const c of pinCols) delete updateData[c];
       }
 
+      await updateUserByPhone(cleanPhone, updateData);
       return new Response(JSON.stringify({ success: true }), { headers });
     }
 
     // 4. DELETE: ลบผู้ใช้งาน
     if (method === 'DELETE') {
       const idOrPhone = String(url.searchParams.get('id') || '').replace(/[^0-9]/g, '');
-      if (!idOrPhone) return new Response(JSON.stringify({ success: false, error: 'ไม่พบข้อมูลที่ต้องการลบ' }), { status: 400, headers });
+      if (!idOrPhone) {
+        return new Response(JSON.stringify({ success: false, error: 'ไม่พบข้อมูลที่ต้องการลบ' }), { status: 400, headers });
+      }
       if (idOrPhone === '0800000000') {
         return new Response(JSON.stringify({ success: false, error: 'ไม่สามารถลบบัญชีแอดมินหลักได้' }), { status: 403, headers });
       }
 
-      await sql`DELETE FROM users WHERE phone = ${idOrPhone} OR phone_number = ${idOrPhone}`;
+      const whereConds = phoneCols.map(c => `regexp_replace(COALESCE(${c}::text, ''), '[^0-9]', '', 'g') = $1`);
+      await sql.unsafe(`DELETE FROM users WHERE ${whereConds.join(' OR ')}`, [idOrPhone]);
       return new Response(JSON.stringify({ success: true }), { headers });
     }
 
