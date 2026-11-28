@@ -212,7 +212,7 @@
       <div class="bg-slate-50 border border-dashed border-slate-300 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3">
         <div>
           <div class="text-xs font-bold text-slate-700">วิธีที่ 1: เลือกไฟล์ .CSV จากเครื่องคอมพิวเตอร์</div>
-          <div class="text-[11px] text-slate-500">รองรับไฟล์ CSV ที่มีหัวคอลัมน์ (phone, rank, name_surname, army_region, unit_name, role, pin) หรือเรียงตามลำดับ 7 คอลัมน์</div>
+          <div class="text-[11px] text-slate-500">รองรับหัวคอลัมน์ เบอร์โทร,ยศ,ชื่อ-สกุล,กองทัพภาค,ชื่อหน่วยฝึก,สิทธิ์,PIN หรือเรียงตามลำดับ 7 คอลัมน์</div>
         </div>
         <label class="cursor-pointer bg-emerald-700 hover:bg-emerald-800 text-white px-3 py-1.5 rounded-lg text-xs font-semibold transition">
           เลือกไฟล์ .CSV
@@ -309,7 +309,7 @@
       return result;
     }
 
-function parseBulkOrCsvText(text) {
+    function parseBulkOrCsvText(text) {
       const cleanText = String(text || '').replace(/^\uFEFF/, '');
       const lines = cleanText.split(/\r?\n/).filter(l => l.trim() !== '');
       if (lines.length === 0) return [];
@@ -317,7 +317,7 @@ function parseBulkOrCsvText(text) {
       const firstCols = lines[0].includes('\t') ? lines[0].split('\t').map(s => s.trim()) : splitCsvLine(lines[0]);
       const lowerHeaders = firstCols.map(h => h.toLowerCase().replace(/\s+/g, '_'));
       const hasNamedHeader = lowerHeaders.some(h =>
-        ['phone', 'phone_number', 'tel', 'เบอร์โทร', 'เบอร์โทรศัพท์', 'name_surname', 'ชื่อ-สกุล', 'ชื่อ', 'unit_name', 'หน่วยฝึก', 'หน่วย'].includes(h)
+        ['phone', 'phone_number', 'tel', 'เบอร์โทร', 'เบอร์โทรศัพท์', 'name_surname', 'ชื่อ-สกุล', 'ชื่อ', 'unit_name', 'ชื่อหน่วยฝึก', 'หน่วยฝึก', 'หน่วย'].includes(h)
       );
 
       const dataLines = hasNamedHeader ? lines.slice(1) : lines;
@@ -341,25 +341,28 @@ function parseBulkOrCsvText(text) {
           const rawPhone = pickField(obj, ['phone', 'phone_number', 'tel', 'เบอร์โทร', 'เบอร์โทรศัพท์']);
           const cleanPhone = rawPhone.replace(/[^0-9]/g, '');
           const rawRole = pickField(obj, ['role', 'สิทธิ์', 'ระดับสิทธิ์']).toLowerCase();
-          const unitVal = pickField(obj, ['unit_name', 'raw_unit', 'unit', 'หน่วยฝึก', 'หน่วย', 'ชื่อหน่วย', 'สังกัดหน่วย']);
+          const unitVal = pickField(obj, ['unit_name', 'raw_unit', 'ชื่อหน่วยฝึก', 'หน่วยฝึก', 'unit', 'หน่วย', 'ชื่อหน่วย', 'สังกัดหน่วย']);
           return {
             phone: cleanPhone,
             rank: pickField(obj, ['rank', 'ยศ', 'คำนำหน้า']),
             name_surname: pickField(obj, ['name_surname', 'full_name', 'ชื่อ-สกุล', 'ชื่อ', 'ชื่อ_นามสกุล']),
             army_region: pickField(obj, ['army_region', 'กองทัพภาค', 'สังกัด']),
             unit_name: unitVal,
+            raw_unit: unitVal,
             role: ['admin', 'command', 'unit'].includes(rawRole) ? rawRole : 'unit',
             pin: pickField(obj, ['pin', 'รหัส_pin', 'รหัสpin']) || '123456'
           };
         } else {
           const [phone, rank, name_surname, army_region, raw_unit, role, pin] = cols;
           const cleanPhone = String(phone || '').replace(/[^0-9]/g, '');
+          const unitVal = String(raw_unit || '').trim();
           return {
             phone: cleanPhone,
             rank: rank || '',
             name_surname: name_surname || '',
             army_region: army_region || '',
-            unit_name: raw_unit || '',
+            unit_name: unitVal,
+            raw_unit: unitVal,
             role: ['admin', 'command', 'unit'].includes((role || '').toLowerCase()) ? role.toLowerCase() : 'unit',
             pin: pin || '123456'
           };
@@ -419,10 +422,11 @@ function parseBulkOrCsvText(text) {
         unit: '<span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">เจ้าหน้าที่หน่วยฝึก</span>'
       };
 
-      tbody.innerHTML = filtered.map((u, idx) => {
+      tbody.innerHTML = filtered.map(u => {
         const displayName = u.name_surname || u.full_name || '-';
         const safePhone = escapeHtml(u.phone);
         const safeName = escapeHtml(displayName);
+        const displayUnit = u.unit_name || u.raw_unit || 'ส่วนกลาง';
         return `
           <tr class="hover:bg-slate-50 transition">
             <td class="py-3 px-4 font-medium text-slate-800">
@@ -432,7 +436,7 @@ function parseBulkOrCsvText(text) {
             <td class="py-3 px-4">${roleBadge[u.role] || escapeHtml(u.role)}</td>
             <td class="py-3 px-4">
               <span class="font-semibold text-slate-700">${escapeHtml(u.army_region || '-')}</span>
-              <div class="text-xs text-slate-500">${u.unit_code ? escapeHtml(u.unit_code) + ' : ' : ''}${escapeHtml(u.unit_name || 'ส่วนกลาง')}</div>
+              <div class="text-xs text-slate-500">${u.unit_code ? escapeHtml(u.unit_code) + ' : ' : ''}${escapeHtml(displayUnit)}</div>
             </td>
             <td class="py-3 px-4 text-center">
               <button onclick="toggleStatus('${safePhone}', ${!u.is_active})" class="px-2.5 py-0.5 rounded-full text-xs font-semibold ${u.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">
@@ -501,7 +505,7 @@ function parseBulkOrCsvText(text) {
       document.getElementById('form-role').value = u.role || 'unit';
       document.getElementById('form-region').value = u.army_region || '';
       filterModalUnits();
-      document.getElementById('form-unit-text').value = u.unit_name || '';
+      document.getElementById('form-unit-text').value = u.unit_name || u.raw_unit || '';
 
       document.getElementById('user-modal').classList.remove('hidden');
       document.getElementById('user-modal').classList.add('flex');
@@ -515,6 +519,7 @@ function parseBulkOrCsvText(text) {
     async function saveUser(e) {
       e.preventDefault();
       const id = document.getElementById('form-id').value;
+      const unitVal = document.getElementById('form-unit-text').value.trim();
       const payload = {
         id: id || undefined,
         rank: document.getElementById('form-rank').value.trim(),
@@ -523,7 +528,8 @@ function parseBulkOrCsvText(text) {
         pin: document.getElementById('form-pin').value.trim(),
         role: document.getElementById('form-role').value,
         army_region: document.getElementById('form-region').value,
-        unit_name: document.getElementById('form-unit-text').value.trim()
+        unit_name: unitVal,
+        raw_unit: unitVal
       };
 
       const res = await fetch('/api/manage_users', {
