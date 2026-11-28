@@ -44,7 +44,7 @@ export async function onRequest(context) {
     };
 
     const getUnitVal = (row) => {
-      for (const c of ['unit_name', 'raw_unit', 'ชื่อหน่วยฝึก', 'unit', 'unit_title', 'training_unit']) {
+      for (const c of ['unit_name', 'raw_unit', 'ชื่อหน่วยฝึก', 'หน่วยฝึก', 'unit', 'unit_title', 'training_unit']) {
         if (row[c] !== undefined && row[c] !== null && String(row[c]).trim() !== '') {
           const val = String(row[c]).trim();
           if (val !== '-' && val !== 'ส่วนกลาง') return val;
