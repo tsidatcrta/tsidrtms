@@ -18,34 +18,24 @@ export async function onRequest(context) {
   }
 
   try {
-    // 1. GET: ดึงรายชื่อผู้ใช้งานทั้งหมด (ไม่อ้างอิงคอลัมน์ id)
     if (method === 'GET') {
       const mode = url.searchParams.get('mode');
       if (mode === 'units') {
         return new Response(JSON.stringify({ success: true, units: [] }), { headers });
       }
 
-      const users = await sql`
-        SELECT * FROM users
-        ORDER BY 
-          CASE role 
-            WHEN 'admin' THEN 1 
-            WHEN 'command' THEN 2 
-            ELSE 3 
-          END,
-          phone ASC
-      `;
-
-      // สร้างฟิลด์ id สำรองจาก id เดิมหรือ phone เพื่อให้หน้าเว็บทำงานได้ปกติ
+      const users = await sql`SELECT * FROM users`;
       const normalized = users.map(u => ({
         ...u,
         id: u.id || u.user_id || u.phone
       }));
 
+      const roleOrder = { admin: 1, command: 2, unit: 3 };
+      normalized.sort((a, b) => (roleOrder[a.role] || 9) - (roleOrder[b.role] || 9));
+
       return new Response(JSON.stringify({ success: true, users: normalized }), { headers });
     }
 
-    // 2. POST: เพิ่มผู้ใช้งานใหม่ หรือ นำเข้าชุดใหญ่
     if (method === 'POST') {
       const body = await request.json();
 
@@ -66,27 +56,21 @@ export async function onRequest(context) {
           }
 
           const rawUnit = String(item.raw_unit || item.unit_name || '').trim();
+          const rankVal = item.rank || '';
+          const nameVal = item.name_surname || '';
 
           const existing = await sql`SELECT phone FROM users WHERE phone = ${cleanPhone} LIMIT 1`;
           if (existing.length > 0) {
             try {
               await sql`
                 UPDATE users 
-                SET rank = ${item.rank || ''},
-                    name_surname = ${item.name_surname || ''},
-                    role = ${role},
-                    army_region = ${cleanRegion},
-                    unit_name = ${rawUnit},
-                    is_active = true
+                SET rank = ${rankVal}, name_surname = ${nameVal}, role = ${role}, army_region = ${cleanRegion}, unit_name = ${rawUnit}, is_active = true
                 WHERE phone = ${cleanPhone}
               `;
             } catch (_) {
               await sql`
                 UPDATE users 
-                SET rank = ${item.rank || ''},
-                    name_surname = ${item.name_surname || ''},
-                    role = ${role},
-                    army_region = ${cleanRegion}
+                SET rank = ${rankVal}, name_surname = ${nameVal}, role = ${role}, army_region = ${cleanRegion}
                 WHERE phone = ${cleanPhone}
               `;
             }
@@ -95,12 +79,12 @@ export async function onRequest(context) {
             try {
               await sql`
                 INSERT INTO users (phone, pin, rank, name_surname, role, army_region, unit_name, is_active)
-                VALUES (${cleanPhone}, ${pin}, ${item.rank || ''}, ${item.name_surname || ''}, ${role}, ${cleanRegion}, ${rawUnit}, true)
+                VALUES (${cleanPhone}, ${pin}, ${rankVal}, ${nameVal}, ${role}, ${cleanRegion}, ${rawUnit}, true)
               `;
             } catch (_) {
               await sql`
                 INSERT INTO users (phone, pin, rank, name_surname, role, army_region)
-                VALUES (${cleanPhone}, ${pin}, ${item.rank || ''}, ${item.name_surname || ''}, ${role}, ${cleanRegion})
+                VALUES (${cleanPhone}, ${pin}, ${rankVal}, ${nameVal}, ${role}, ${cleanRegion})
               `;
             }
             importedCount++;
@@ -113,7 +97,6 @@ export async function onRequest(context) {
         );
       }
 
-      // เพิ่มทีละ 1 รายการ
       const cleanPhone = String(body.phone || '').replace(/[^0-9]/g, '');
       if (!cleanPhone || !body.name_surname) {
         return new Response(
@@ -146,7 +129,6 @@ export async function onRequest(context) {
       return new Response(JSON.stringify({ success: true }), { headers });
     }
 
-    // 3. PUT: แก้ไขข้อมูล / รีเซ็ต PIN / เปิด-ปิดสถานะ (ใช้ phone เป็นคีย์อ้างอิง)
     if (method === 'PUT') {
       const body = await request.json();
       const targetPhone = String(body.phone || body.id || '').replace(/[^0-9]/g, '');
@@ -167,20 +149,13 @@ export async function onRequest(context) {
       if (body.pin && String(body.pin).trim() !== '') {
         await sql`
           UPDATE users
-          SET pin = ${String(body.pin).trim()},
-              rank = ${body.rank || ''},
-              name_surname = ${body.name_surname || ''},
-              role = ${body.role || 'unit'},
-              army_region = ${body.army_region || ''}
+          SET pin = ${String(body.pin).trim()}, rank = ${body.rank || ''}, name_surname = ${body.name_surname || ''}, role = ${body.role || 'unit'}, army_region = ${body.army_region || ''}
           WHERE phone = ${targetPhone}
         `;
       } else {
         await sql`
           UPDATE users
-          SET rank = ${body.rank || ''},
-              name_surname = ${body.name_surname || ''},
-              role = ${body.role || 'unit'},
-              army_region = ${body.army_region || ''}
+          SET rank = ${body.rank || ''}, name_surname = ${body.name_surname || ''}, role = ${body.role || 'unit'}, army_region = ${body.army_region || ''}
           WHERE phone = ${targetPhone}
         `;
       }
@@ -188,9 +163,22 @@ export async function onRequest(context) {
       return new Response(JSON.stringify({ success: true }), { headers });
     }
 
-    // 4. DELETE: ลบผู้ใช้งานด้วยเบอร์โทร
     if (method === 'DELETE') {
       const idOrPhone = String(url.searchParams.get('id') || '').replace(/[^0-9]/g, '');
       if (!idOrPhone) return new Response(JSON.stringify({ success: false, error: 'ไม่พบข้อมูลที่ต้องการลบ' }), { status: 400, headers });
       if (idOrPhone === '0800000000') {
-        return new Response(JSON.stringify({ success: false, error: 'ไม่สามารถลบบัญชีแอดมินหลักได้' }), { status: 403
+        return new Response(JSON.stringify({ success: false, error: 'ไม่สามารถลบบัญชีแอดมินหลักได้' }), { status: 403, headers });
+      }
+
+      await sql`DELETE FROM users WHERE phone = ${idOrPhone}`;
+      return new Response(JSON.stringify({ success: true }), { headers });
+    }
+
+    return new Response(JSON.stringify({ success: false, error: 'Method not allowed' }), { status: 405, headers });
+  } catch (err) {
+    return new Response(
+      JSON.stringify({ success: false, error: err.message }),
+      { status: 500, headers }
+    );
+  }
+}
