@@ -26,7 +26,7 @@ export async function onRequest(context) {
     const colSet = new Set(colsRows.map(r => r.column_name));
 
     const getPhoneVal = (row) => {
-      for (const c of ['phone', 'phone_number', 'username', 'tel']) {
+      for (const c of ['phone', 'phone_number', 'username', 'tel', 'เบอร์โทร', 'เบอร์โทรศัพท์']) {
         if (row[c] !== undefined && row[c] !== null && String(row[c]).trim() !== '') {
           return String(row[c]).trim();
         }
@@ -44,10 +44,41 @@ export async function onRequest(context) {
     };
 
     const getUnitVal = (row) => {
-      for (const c of ['unit_name', 'raw_unit', 'unit', 'unit_title', 'training_unit']) {
+      for (const c of ['unit_name', 'raw_unit', 'ชื่อหน่วยฝึก', 'unit', 'unit_title', 'training_unit']) {
         if (row[c] !== undefined && row[c] !== null && String(row[c]).trim() !== '') {
           const val = String(row[c]).trim();
           if (val !== '-' && val !== 'ส่วนกลาง') return val;
+        }
+      }
+      return '';
+    };
+
+    const getRegionVal = (row) => {
+      for (const c of ['army_region', 'กองทัพภาค', 'สังกัด']) {
+        if (row[c] !== undefined && row[c] !== null && String(row[c]).trim() !== '') {
+          let val = String(row[c]).trim();
+          if (val.includes(':')) {
+            val = val.split(':').pop().trim();
+          }
+          return val;
+        }
+      }
+      return '';
+    };
+
+    const getRankVal = (row) => {
+      for (const c of ['rank', 'ยศ', 'คำนำหน้า']) {
+        if (row[c] !== undefined && row[c] !== null && String(row[c]).trim() !== '') {
+          return String(row[c]).trim();
+        }
+      }
+      return '';
+    };
+
+    const getNameVal = (row) => {
+      for (const c of ['name_surname', 'full_name', 'ชื่อ-สกุล', 'ชื่อ']) {
+        if (row[c] !== undefined && row[c] !== null && String(row[c]).trim() !== '') {
+          return String(row[c]).trim();
         }
       }
       return '';
@@ -73,18 +104,14 @@ export async function onRequest(context) {
     };
 
     const normalizeRecord = (raw) => {
-      const cleanPhone = String(raw.phone || raw.phone_number || raw.id || '').replace(/[^0-9]/g, '');
-      const pinVal = String(raw.pin || raw.pin_hash || '123456').trim() || '123456';
-      const roleVal = normalizeRole(raw.role);
-
-      let cleanRegion = String(raw.army_region || '').trim();
-      if (cleanRegion.includes(':')) {
-        cleanRegion = cleanRegion.split(':').pop().trim();
-      }
-
+      const rawPhone = getPhoneVal(raw) || String(raw.id || '').trim();
+      const cleanPhone = rawPhone.replace(/[^0-9]/g, '');
+      const pinVal = getPinVal(raw);
+      const roleVal = normalizeRole(raw.role || raw['สิทธิ์'] || raw['ระดับสิทธิ์']);
+      const cleanRegion = getRegionVal(raw);
       const unitVal = getUnitVal(raw);
-      const rankVal = String(raw.rank || '').trim();
-      const nameVal = String(raw.name_surname || raw.full_name || '').trim();
+      const rankVal = getRankVal(raw);
+      const nameVal = getNameVal(raw);
       const { firstName, lastName } = splitName(nameVal || rankVal || cleanPhone);
       const firstVal = String(raw.first_name || firstName || '').trim();
       const lastVal = String(raw.last_name || lastName || '').trim();
@@ -210,7 +237,7 @@ export async function onRequest(context) {
                   first_name = CASE WHEN ${hasFirstName} THEN ${rec.firstVal} ELSE first_name END,
                   last_name = CASE WHEN ${hasLastName} THEN ${rec.lastVal} ELSE last_name END,
                   role = CASE WHEN ${hasRole} THEN ${rec.roleVal} ELSE role END,
-                  army_region = CASE WHEN ${hasRegion} THEN ${rec.cleanRegion} ELSE army_region END,
+                  army_region = CASE WHEN ${hasRegion} AND ${rec.cleanRegion} <> '' THEN ${rec.cleanRegion} ELSE army_region END,
                   unit_name = CASE WHEN ${hasUnitName} AND ${rec.unitVal} <> '' THEN ${rec.unitVal} ELSE unit_name END,
                   is_active = CASE WHEN ${hasActive} THEN ${rec.activeVal} ELSE is_active END
               WHERE phone = ${rec.cleanPhone} OR phone_number = ${rec.cleanPhone}
