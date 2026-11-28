@@ -31,13 +31,25 @@ export async function onRequest(context) {
     await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS unit_name TEXT DEFAULT ''`;
     await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true`;
 
-    // ปรับ users_role_check ให้รองรับค่า role ที่ใช้งานจริงในระบบ
+    // ล้าง constraint เดิม แปลงค่า role ของแถวเดิมให้ถูกต้องก่อน แล้วค่อยสร้างและ validate constraint
     await sql`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`;
+    await sql`
+      UPDATE users
+      SET role = CASE
+        WHEN lower(trim(COALESCE(role, ''))) IN ('admin', 'ผู้ดูแลระบบ', 'แอดมิน') THEN 'admin'
+        WHEN lower(trim(COALESCE(role, ''))) IN ('command', 'ทภ.', 'นขต.ทบ.', 'ผู้บังคับบัญชา', 'commander') THEN 'command'
+        WHEN lower(trim(COALESCE(role, ''))) IN ('trainer', 'ผู้ฝึก', 'ครูฝึก') THEN 'trainer'
+        WHEN lower(trim(COALESCE(role, ''))) IN ('user', 'หน่วย', 'หน่วยฝึก', 'unit', 'viewer', 'staff', '') THEN 'unit'
+        ELSE 'unit'
+      END
+    `;
     await sql`
       ALTER TABLE users
       ADD CONSTRAINT users_role_check
       CHECK (role IN ('admin', 'command', 'unit', 'user', 'trainer', 'commander', 'viewer', 'staff'))
+      NOT VALID
     `;
+    await sql`ALTER TABLE users VALIDATE CONSTRAINT users_role_check`;
 
     const colsRows = await sql`
       SELECT column_name
