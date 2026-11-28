@@ -226,8 +226,8 @@
     async function loadData() {
       try {
         const [uRes, unitRes] = await Promise.all([
-          fetch('/api/users'),
-          fetch('/api/users?mode=units')
+          fetch('/api/manage_users'),
+          fetch('/api/manage_users?mode=units')
         ]);
         const uData = await uRes.json();
         const unitData = await unitRes.json();
@@ -374,7 +374,7 @@
         unit_id: document.getElementById('form-unit').value || null
       };
 
-      const res = await fetch('/api/users', {
+      const res = await fetch('/api/manage_users', {
         method: id ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -390,7 +390,7 @@
 
     async function resetPin(id, name) {
       if (!confirm(`ต้องการรีเซ็ต PIN ของ "${name}" กลับเป็น 123456 ใช่หรือไม่?`)) return;
-      const res = await fetch('/api/users', {
+      const res = await fetch('/api/manage_users', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, action: 'reset_pin', pin: '123456' })
@@ -400,7 +400,7 @@
     }
 
     async function toggleStatus(id, newStatus) {
-      const res = await fetch('/api/users', {
+      const res = await fetch('/api/manage_users', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, action: 'toggle_status', is_active: newStatus })
@@ -411,7 +411,7 @@
 
     async function deleteUser(id, name) {
       if (!confirm(`ยืนยันการลบบัญชีผู้ใช้งาน "${name}" ออกจากระบบ?`)) return;
-      const res = await fetch(`/api/users?id=${id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/manage_users?id=${id}`, { method: 'DELETE' });
       const data = await res.json();
       if (data.success) loadData();
       else alert(data.error || 'ลบข้อมูลไม่สำเร็จ');
@@ -452,7 +452,7 @@
           };
         });
 
-        const res = await fetch('/api/users', {
+        const res = await fetch('/api/manage_users', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'bulk_import', records })
