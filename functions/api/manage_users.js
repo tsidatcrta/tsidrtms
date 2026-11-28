@@ -25,40 +25,6 @@ export async function onRequest(context) {
     `;
     const colSet = new Set(colsRows.map(r => r.column_name));
 
-    const requiredCols = [
-      ['phone', 'TEXT'],
-      ['phone_number', 'TEXT'],
-      ['pin', "TEXT DEFAULT '123456'"],
-      ['pin_hash', "TEXT DEFAULT '123456'"],
-      ['rank', "TEXT DEFAULT ''"],
-      ['name_surname', "TEXT DEFAULT ''"],
-      ['first_name', "TEXT DEFAULT ''"],
-      ['last_name', "TEXT DEFAULT ''"],
-      ['role', "TEXT DEFAULT 'unit'"],
-      ['army_region', "TEXT DEFAULT ''"],
-      ['unit_name', "TEXT DEFAULT ''"],
-      ['is_active', 'BOOLEAN DEFAULT true']
-    ];
-
-    for (const [colName, ddl] of requiredCols) {
-      if (!colSet.has(colName)) {
-        await sql`SELECT 1`;
-        if (colName === 'phone') await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT`;
-        else if (colName === 'phone_number') await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number TEXT`;
-        else if (colName === 'pin') await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS pin TEXT DEFAULT '123456'`;
-        else if (colName === 'pin_hash') await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_hash TEXT DEFAULT '123456'`;
-        else if (colName === 'rank') await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS rank TEXT DEFAULT ''`;
-        else if (colName === 'name_surname') await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS name_surname TEXT DEFAULT ''`;
-        else if (colName === 'first_name') await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT DEFAULT ''`;
-        else if (colName === 'last_name') await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name TEXT DEFAULT ''`;
-        else if (colName === 'role') await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'unit'`;
-        else if (colName === 'army_region') await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS army_region TEXT DEFAULT ''`;
-        else if (colName === 'unit_name') await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS unit_name TEXT DEFAULT ''`;
-        else if (colName === 'is_active') await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true`;
-        colSet.add(colName);
-      }
-    }
-
     const getPhoneVal = (row) => {
       for (const c of ['phone', 'phone_number', 'username', 'tel']) {
         if (row[c] !== undefined && row[c] !== null && String(row[c]).trim() !== '') {
@@ -128,6 +94,14 @@ export async function onRequest(context) {
       };
     };
 
+    const toCsvCell = (val) => {
+      const s = String(val ?? '');
+      if (s.includes('"') || s.includes(',') || s.includes('\n')) {
+        return `"${s.replace(/"/g, '""')}"`;
+      }
+      return s;
+    };
+
     if (method === 'GET') {
       const mode = url.searchParams.get('mode');
       if (mode === 'units') {
@@ -162,6 +136,21 @@ export async function onRequest(context) {
         return String(a.phone).localeCompare(String(b.phone));
       });
 
+      if (url.searchParams.get('format') === 'csv') {
+        const csvHeaders = ['phone', 'pin', 'rank', 'name_surname', 'role', 'army_region', 'unit_name', 'is_active'];
+        const lines = [
+          csvHeaders.join(','),
+          ...normalized.map(u => csvHeaders.map(h => toCsvCell(u[h])).join(','))
+        ];
+        return new Response('\uFEFF' + lines.join('\n'), {
+          headers: {
+            'Content-Type': 'text/csv; charset=utf-8',
+            'Content-Disposition': 'attachment; filename="users.csv"',
+            'Access-Control-Allow-Origin': '*'
+          }
+        });
+      }
+
       return new Response(JSON.stringify({ success: true, users: normalized }), { headers });
     }
 
@@ -185,23 +174,35 @@ export async function onRequest(context) {
         let importedCount = 0;
         let updatedCount = 0;
         const hasFullName = colSet.has('full_name');
+        const hasPhone = colSet.has('phone');
+        const hasPhoneNum = colSet.has('phone_number');
+        const hasPin = colSet.has('pin');
+        const hasPinHash = colSet.has('pin_hash');
+        const hasRank = colSet.has('rank');
+        const hasNameSurname = colSet.has('name_surname');
+        const hasFirstName = colSet.has('first_name');
+        const hasLastName = colSet.has('last_name');
+        const hasRole = colSet.has('role');
+        const hasRegion = colSet.has('army_region');
+        const hasUnitName = colSet.has('unit_name');
+        const hasActive = colSet.has('is_active');
 
         for (const rec of dedupMap.values()) {
           if (existingPhones.has(rec.cleanPhone)) {
             await sql`
               UPDATE users
-              SET phone = ${rec.cleanPhone},
-                  phone_number = ${rec.cleanPhone},
-                  pin = ${rec.pinVal},
-                  pin_hash = ${rec.pinVal},
-                  rank = ${rec.rankVal},
-                  name_surname = ${rec.nameVal},
-                  first_name = ${rec.firstVal},
-                  last_name = ${rec.lastVal},
-                  role = ${rec.roleVal},
-                  army_region = ${rec.cleanRegion},
-                  unit_name = ${rec.unitVal},
-                  is_active = ${rec.activeVal}
+              SET phone = CASE WHEN ${hasPhone} THEN ${rec.cleanPhone} ELSE phone END,
+                  phone_number = CASE WHEN ${hasPhoneNum} THEN ${rec.cleanPhone} ELSE phone_number END,
+                  pin = CASE WHEN ${hasPin} THEN ${rec.pinVal} ELSE pin END,
+                  pin_hash = CASE WHEN ${hasPinHash} THEN ${rec.pinVal} ELSE pin_hash END,
+                  rank = CASE WHEN ${hasRank} THEN ${rec.rankVal} ELSE rank END,
+                  name_surname = CASE WHEN ${hasNameSurname} THEN ${rec.nameVal} ELSE name_surname END,
+                  first_name = CASE WHEN ${hasFirstName} THEN ${rec.firstVal} ELSE first_name END,
+                  last_name = CASE WHEN ${hasLastName} THEN ${rec.lastVal} ELSE last_name END,
+                  role = CASE WHEN ${hasRole} THEN ${rec.roleVal} ELSE role END,
+                  army_region = CASE WHEN ${hasRegion} THEN ${rec.cleanRegion} ELSE army_region END,
+                  unit_name = CASE WHEN ${hasUnitName} THEN ${rec.unitVal} ELSE unit_name END,
+                  is_active = CASE WHEN ${hasActive} THEN ${rec.activeVal} ELSE is_active END
               WHERE phone = ${rec.cleanPhone} OR phone_number = ${rec.cleanPhone}
             `;
             if (hasFullName) {
