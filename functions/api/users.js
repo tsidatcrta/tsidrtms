@@ -18,66 +18,84 @@ export async function onRequest(context) {
   }
 
   try {
-    // 1. GET: ดึงรายชื่อหน่วยฝึก และรายชื่อผู้ใช้งานทั้งหมด (ใช้คอลัมน์ name_surname)
+    // 1. GET: ดึงรายชื่อผู้ใช้งานทั้งหมด (และลองดึงตาราง units หากมีอยู่จริง)
     if (method === 'GET') {
       const mode = url.searchParams.get('mode');
 
       if (mode === 'units') {
-        const units = await sql`
-          SELECT * FROM units
-          ORDER BY id ASC
-        `;
-        return new Response(JSON.stringify({ success: true, units }), { headers });
+        try {
+          const units = await sql`SELECT * FROM units ORDER BY id ASC`;
+          return new Response(JSON.stringify({ success: true, units }), { headers });
+        } catch (_) {
+          return new Response(JSON.stringify({ success: true, units: [] }), { headers });
+        }
       }
 
-      const users = await sql`
-        SELECT 
-          u.*,
-          un.unit_name,
-          un.unit_code
-        FROM users u
-        LEFT JOIN units un ON u.unit_id = un.id
-        ORDER BY 
-          CASE u.role 
-            WHEN 'admin' THEN 1 
-            WHEN 'command' THEN 2 
-            ELSE 3 
-          END,
-          u.id ASC
-      `;
+      let users = [];
+      try {
+        users = await sql`
+          SELECT 
+            u.*,
+            un.unit_name,
+            un.unit_code
+          FROM users u
+          LEFT JOIN units un ON u.unit_id = un.id
+          ORDER BY 
+            CASE u.role 
+              WHEN 'admin' THEN 1 
+              WHEN 'command' THEN 2 
+              ELSE 3 
+            END,
+            u.id ASC
+        `;
+      } catch (_) {
+        // กรณีไม่มีตาราง units ในฐานข้อมูล ให้ดึงเฉพาะตาราง users
+        users = await sql`
+          SELECT * FROM users
+          ORDER BY 
+            CASE role 
+              WHEN 'admin' THEN 1 
+              WHEN 'command' THEN 2 
+              ELSE 3 
+            END,
+            id ASC
+        `;
+      }
 
       return new Response(JSON.stringify({ success: true, users }), { headers });
     }
 
-    // 2. POST: เพิ่มผู้ใช้งานใหม่ หรือ นำเข้าชุดใหญ่ (รองรับรูปแบบ "01 : ทภ.1" และ "001 : ชื่อหน่วย")
+    // 2. POST: เพิ่มผู้ใช้งานใหม่ หรือ นำเข้าชุดใหญ่
     if (method === 'POST') {
       const body = await request.json();
 
       if (body.action === 'bulk_import' && Array.isArray(body.records)) {
-        // โหลดรายการหน่วยทั้งหมดมาเตรียมจับคู่ด้วยรหัส 3 หลัก หรือชื่อหน่วย
-        const allUnits = await sql`SELECT id, unit_code, unit_name, army_region FROM units`;
+        let allUnits = [];
+        try {
+          allUnits = await sql`SELECT id, unit_code, unit_name, army_region FROM units`;
+        } catch (_) {
+          allUnits = [];
+        }
 
         let importedCount = 0;
         let updatedCount = 0;
 
         for (const item of body.records) {
           const cleanPhone = String(item.phone || '').replace(/[^0-9]/g, '');
-          // ข้ามแถวหัวตารางหรือเบอร์โทรไม่ครบ 9-10 หลัก
           if (cleanPhone.length < 9) continue;
 
-          const pin = String(item.pin || '123456').trim();
+          const pin = String(item.pin || '123456').trim() || '123456';
           const role = ['admin', 'command', 'unit'].includes(item.role) ? item.role : 'unit';
 
-          // ตัดคำนำหน้า "01 : ทภ.1" ให้เหลือ "ทภ.1"
           let cleanRegion = String(item.army_region || '').trim();
           if (cleanRegion.includes(':')) {
             cleanRegion = cleanRegion.split(':').pop().trim();
           }
 
-          // จับคู่ unit_id จากรหัส "001 : ส.พัน.21 ทภ.1" หรือชื่อหน่วย
+          const rawUnit = String(item.raw_unit || item.unit_name || '').trim();
           let unitId = item.unit_id ? Number(item.unit_id) : null;
-          if (!unitId && item.raw_unit) {
-            const rawUnit = String(item.raw_unit).trim();
+
+          if (!unitId && rawUnit && allUnits.length > 0) {
             const codePart = rawUnit.includes(':') ? rawUnit.split(':')[0].trim() : '';
             const namePart = rawUnit.includes(':') ? rawUnit.split(':').slice(1).join(':').trim() : rawUnit;
 
@@ -94,22 +112,43 @@ export async function onRequest(context) {
 
           const existing = await sql`SELECT id FROM users WHERE phone = ${cleanPhone} LIMIT 1`;
           if (existing.length > 0) {
-            await sql`
-              UPDATE users 
-              SET rank = ${item.rank || ''},
-                  name_surname = ${item.name_surname || ''},
-                  role = ${role},
-                  army_region = ${cleanRegion},
-                  unit_id = ${unitId},
-                  is_active = true
-              WHERE phone = ${cleanPhone}
-            `;
+            try {
+              await sql`
+                UPDATE users 
+                SET rank = ${item.rank || ''},
+                    name_surname = ${item.name_surname || ''},
+                    role = ${role},
+                    army_region = ${cleanRegion},
+                    unit_id = ${unitId},
+                    unit_name = ${rawUnit},
+                    is_active = true
+                WHERE phone = ${cleanPhone}
+              `;
+            } catch (_) {
+              await sql`
+                UPDATE users 
+                SET rank = ${item.rank || ''},
+                    name_surname = ${item.name_surname || ''},
+                    role = ${role},
+                    army_region = ${cleanRegion},
+                    unit_id = ${unitId},
+                    is_active = true
+                WHERE phone = ${cleanPhone}
+              `;
+            }
             updatedCount++;
           } else {
-            await sql`
-              INSERT INTO users (phone, pin, rank, name_surname, role, army_region, unit_id, is_active)
-              VALUES (${cleanPhone}, ${pin}, ${item.rank || ''}, ${item.name_surname || ''}, ${role}, ${cleanRegion}, ${unitId}, true)
-            `;
+            try {
+              await sql`
+                INSERT INTO users (phone, pin, rank, name_surname, role, army_region, unit_id, unit_name, is_active)
+                VALUES (${cleanPhone}, ${pin}, ${item.rank || ''}, ${item.name_surname || ''}, ${role}, ${cleanRegion}, ${unitId}, ${rawUnit}, true)
+              `;
+            } catch (_) {
+              await sql`
+                INSERT INTO users (phone, pin, rank, name_surname, role, army_region, unit_id, is_active)
+                VALUES (${cleanPhone}, ${pin}, ${item.rank || ''}, ${item.name_surname || ''}, ${role}, ${cleanRegion}, ${unitId}, true)
+              `;
+            }
             importedCount++;
           }
         }
@@ -137,7 +176,7 @@ export async function onRequest(context) {
         );
       }
 
-      const pin = String(body.pin || '123456').trim();
+      const pin = String(body.pin || '123456').trim() || '123456';
       const unitId = body.unit_id ? Number(body.unit_id) : null;
 
       await sql`
