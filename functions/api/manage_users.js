@@ -24,6 +24,8 @@ export async function onRequest(context) {
     await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_hash TEXT DEFAULT '123456'`;
     await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS rank TEXT DEFAULT ''`;
     await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS name_surname TEXT DEFAULT ''`;
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT DEFAULT ''`;
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name TEXT DEFAULT ''`;
     await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'unit'`;
     await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS army_region TEXT DEFAULT ''`;
     await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS unit_name TEXT DEFAULT ''`;
@@ -54,6 +56,16 @@ export async function onRequest(context) {
       return '123456';
     };
 
+    const splitName = (fullStr) => {
+      const cleaned = String(fullStr || '').trim().replace(/\s+/g, ' ');
+      if (!cleaned) return { firstName: '', lastName: '' };
+      const parts = cleaned.split(' ');
+      return {
+        firstName: parts[0] || cleaned,
+        lastName: parts.slice(1).join(' ')
+      };
+    };
+
     const upsertUserRecord = async (raw) => {
       const cleanPhone = String(raw.phone || raw.phone_number || raw.id || '').replace(/[^0-9]/g, '');
       const pinVal = String(raw.pin || raw.pin_hash || '123456').trim() || '123456';
@@ -67,6 +79,9 @@ export async function onRequest(context) {
       const unitVal = String(raw.raw_unit || raw.unit_name || '').trim();
       const rankVal = String(raw.rank || '').trim();
       const nameVal = String(raw.name_surname || raw.full_name || '').trim();
+      const { firstName, lastName } = splitName(nameVal || rankVal || cleanPhone);
+      const firstVal = String(raw.first_name || firstName || '').trim();
+      const lastVal = String(raw.last_name || lastName || '').trim();
       const activeVal = raw.is_active !== undefined ? Boolean(raw.is_active) : true;
 
       const existing = await sql`
@@ -85,6 +100,8 @@ export async function onRequest(context) {
               pin_hash = ${pinVal},
               rank = ${rankVal},
               name_surname = ${nameVal},
+              first_name = ${firstVal},
+              last_name = ${lastVal},
               role = ${roleVal},
               army_region = ${cleanRegion},
               unit_name = ${unitVal},
@@ -102,10 +119,10 @@ export async function onRequest(context) {
       } else {
         await sql`
           INSERT INTO users (
-            phone, phone_number, pin, pin_hash, rank, name_surname, role, army_region, unit_name, is_active
+            phone, phone_number, pin, pin_hash, rank, name_surname, first_name, last_name, role, army_region, unit_name, is_active
           )
           VALUES (
-            ${cleanPhone}, ${cleanPhone}, ${pinVal}, ${pinVal}, ${rankVal}, ${nameVal}, ${roleVal}, ${cleanRegion}, ${unitVal}, ${activeVal}
+            ${cleanPhone}, ${cleanPhone}, ${pinVal}, ${pinVal}, ${rankVal}, ${nameVal}, ${firstVal}, ${lastVal}, ${roleVal}, ${cleanRegion}, ${unitVal}, ${activeVal}
           )
         `;
         if (colSet.has('full_name')) {
@@ -119,7 +136,6 @@ export async function onRequest(context) {
       }
     };
 
-    // 1. GET: ดึงรายชื่อผู้ใช้งานทั้งหมด
     if (method === 'GET') {
       const mode = url.searchParams.get('mode');
       if (mode === 'units') {
@@ -129,13 +145,16 @@ export async function onRequest(context) {
       const rows = await sql`SELECT * FROM users`;
       const normalized = rows.map(u => {
         const pVal = getPhoneVal(u);
+        const combinedName = u.name_surname || u.full_name || [u.first_name, u.last_name].filter(Boolean).join(' ') || '';
         return {
           ...u,
           phone: pVal,
           phone_number: pVal,
           pin: getPinVal(u),
           rank: u.rank || '',
-          name_surname: u.name_surname || u.full_name || '',
+          name_surname: combinedName,
+          first_name: u.first_name || '',
+          last_name: u.last_name || '',
           role: u.role || 'unit',
           army_region: u.army_region || '',
           unit_name: u.unit_name || '',
@@ -154,7 +173,6 @@ export async function onRequest(context) {
       return new Response(JSON.stringify({ success: true, users: normalized }), { headers });
     }
 
-    // 2. POST: เพิ่มผู้ใช้งานใหม่ หรือ นำเข้าชุดใหญ่
     if (method === 'POST') {
       const body = await request.json();
 
@@ -202,7 +220,6 @@ export async function onRequest(context) {
       return new Response(JSON.stringify({ success: true }), { headers });
     }
 
-    // 3. PUT: แก้ไขข้อมูล / รีเซ็ต PIN / เปิด-ปิดสถานะ
     if (method === 'PUT') {
       const body = await request.json();
       const targetPhone = String(body.phone || body.phone_number || body.id || '').replace(/[^0-9]/g, '');
@@ -240,6 +257,10 @@ export async function onRequest(context) {
       const pinToSave = (body.pin && String(body.pin).trim() !== '')
         ? String(body.pin).trim()
         : getPinVal(current);
+      const nextName = body.name_surname !== undefined
+        ? String(body.name_surname).trim()
+        : (current.name_surname || current.full_name || '');
+      const { firstName, lastName } = splitName(nextName);
 
       await sql`
         UPDATE users
@@ -248,7 +269,9 @@ export async function onRequest(context) {
             pin = ${pinToSave},
             pin_hash = ${pinToSave},
             rank = ${body.rank !== undefined ? String(body.rank).trim() : (current.rank || '')},
-            name_surname = ${body.name_surname !== undefined ? String(body.name_surname).trim() : (current.name_surname || current.full_name || '')},
+            name_surname = ${nextName},
+            first_name = ${body.first_name !== undefined ? String(body.first_name).trim() : (firstName || current.first_name || '')},
+            last_name = ${body.last_name !== undefined ? String(body.last_name).trim() : (lastName || current.last_name || '')},
             role = ${body.role || current.role || 'unit'},
             army_region = ${body.army_region !== undefined ? String(body.army_region).trim() : (current.army_region || '')},
             unit_name = ${body.unit_name !== undefined ? String(body.unit_name).trim() : (current.unit_name || '')}
@@ -258,7 +281,6 @@ export async function onRequest(context) {
       return new Response(JSON.stringify({ success: true }), { headers });
     }
 
-    // 4. DELETE: ลบผู้ใช้งาน
     if (method === 'DELETE') {
       const idOrPhone = String(url.searchParams.get('id') || '').replace(/[^0-9]/g, '');
       if (!idOrPhone) {
