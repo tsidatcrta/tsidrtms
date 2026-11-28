@@ -31,6 +31,14 @@ export async function onRequest(context) {
     await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS unit_name TEXT DEFAULT ''`;
     await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true`;
 
+    // ปรับ users_role_check ให้รองรับค่า role ที่ใช้งานจริงในระบบ
+    await sql`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`;
+    await sql`
+      ALTER TABLE users
+      ADD CONSTRAINT users_role_check
+      CHECK (role IN ('admin', 'command', 'unit', 'user', 'trainer', 'commander', 'viewer', 'staff'))
+    `;
+
     const colsRows = await sql`
       SELECT column_name
       FROM information_schema.columns
@@ -56,6 +64,15 @@ export async function onRequest(context) {
       return '123456';
     };
 
+    const normalizeRole = (rawRole) => {
+      const r = String(rawRole || '').trim().toLowerCase();
+      if (['admin', 'ผู้ดูแลระบบ', 'แอดมิน'].includes(r)) return 'admin';
+      if (['command', 'ทภ.', 'นขต.ทบ.', 'ผู้บังคับบัญชา', 'commander'].includes(r)) return 'command';
+      if (['trainer', 'ผู้ฝึก', 'ครูฝึก'].includes(r)) return 'trainer';
+      if (['user', 'หน่วย', 'หน่วยฝึก', 'unit'].includes(r)) return 'unit';
+      return 'unit';
+    };
+
     const splitName = (fullStr) => {
       const cleaned = String(fullStr || '').trim().replace(/\s+/g, ' ');
       if (!cleaned) return { firstName: '', lastName: '' };
@@ -69,7 +86,7 @@ export async function onRequest(context) {
     const upsertUserRecord = async (raw) => {
       const cleanPhone = String(raw.phone || raw.phone_number || raw.id || '').replace(/[^0-9]/g, '');
       const pinVal = String(raw.pin || raw.pin_hash || '123456').trim() || '123456';
-      const roleVal = ['admin', 'command', 'unit'].includes(raw.role) ? raw.role : 'unit';
+      const roleVal = normalizeRole(raw.role);
 
       let cleanRegion = String(raw.army_region || '').trim();
       if (cleanRegion.includes(':')) {
@@ -155,7 +172,7 @@ export async function onRequest(context) {
           name_surname: combinedName,
           first_name: u.first_name || '',
           last_name: u.last_name || '',
-          role: u.role || 'unit',
+          role: normalizeRole(u.role),
           army_region: u.army_region || '',
           unit_name: u.unit_name || '',
           is_active: u.is_active !== false,
@@ -163,7 +180,7 @@ export async function onRequest(context) {
         };
       });
 
-      const roleOrder = { admin: 1, command: 2, unit: 3 };
+      const roleOrder = { admin: 1, command: 2, unit: 3, trainer: 3, user: 3 };
       normalized.sort((a, b) => {
         const rDiff = (roleOrder[a.role] || 9) - (roleOrder[b.role] || 9);
         if (rDiff !== 0) return rDiff;
@@ -261,6 +278,7 @@ export async function onRequest(context) {
         ? String(body.name_surname).trim()
         : (current.name_surname || current.full_name || '');
       const { firstName, lastName } = splitName(nextName);
+      const nextRole = body.role !== undefined ? normalizeRole(body.role) : normalizeRole(current.role);
 
       await sql`
         UPDATE users
@@ -272,7 +290,7 @@ export async function onRequest(context) {
             name_surname = ${nextName},
             first_name = ${body.first_name !== undefined ? String(body.first_name).trim() : (firstName || current.first_name || '')},
             last_name = ${body.last_name !== undefined ? String(body.last_name).trim() : (lastName || current.last_name || '')},
-            role = ${body.role || current.role || 'unit'},
+            role = ${nextRole},
             army_region = ${body.army_region !== undefined ? String(body.army_region).trim() : (current.army_region || '')},
             unit_name = ${body.unit_name !== undefined ? String(body.unit_name).trim() : (current.unit_name || '')}
         WHERE phone = ${targetPhone} OR phone_number = ${targetPhone}
