@@ -18,48 +18,17 @@ export async function onRequest(context) {
   }
 
   try {
-    const colsRows = await sql`
-      SELECT column_name
-      FROM information_schema.columns
-      WHERE table_schema = 'public' AND table_name = 'users'
-    `;
-    const colSet = new Set(colsRows.map(r => r.column_name));
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT`;
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS pin TEXT DEFAULT '123456'`;
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS rank TEXT DEFAULT ''`;
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS name_surname TEXT DEFAULT ''`;
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'unit'`;
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS army_region TEXT DEFAULT ''`;
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS unit_name TEXT DEFAULT ''`;
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true`;
 
-    const phoneCandidates = ['phone', 'username', 'tel', 'mobile', 'user_phone'];
-    let phoneCol = phoneCandidates.find(c => colSet.has(c));
-    if (!phoneCol) {
-      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT`;
-      phoneCol = 'phone';
-      colSet.add('phone');
-    }
+    const getPhoneVal = (row) => String(row.phone || row.username || row.tel || '').trim();
 
-    const pinCandidates = ['pin', 'password', 'passcode', 'user_pin'];
-    let pinCol = pinCandidates.find(c => colSet.has(c));
-    if (!pinCol) {
-      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS pin TEXT`;
-      pinCol = 'pin';
-      colSet.add('pin');
-    }
-
-    const nameCol = colSet.has('name_surname')
-      ? 'name_surname'
-      : (colSet.has('full_name') ? 'full_name' : null);
-
-    const getPhoneVal = (row) => String(row[phoneCol] || row.phone || row.username || '').trim();
-
-    const setPinByPhone = async (targetPhone, pinVal) => {
-      if (pinCol === 'pin') {
-        await sql`UPDATE users SET pin = ${pinVal} WHERE phone = ${targetPhone}`;
-      } else if (pinCol === 'password') {
-        await sql`UPDATE users SET password = ${pinVal} WHERE phone = ${targetPhone}`;
-      } else if (pinCol === 'passcode') {
-        await sql`UPDATE users SET passcode = ${pinVal} WHERE phone = ${targetPhone}`;
-      } else if (pinCol === 'user_pin') {
-        await sql`UPDATE users SET user_pin = ${pinVal} WHERE phone = ${targetPhone}`;
-      }
-    };
-
-    // 1. GET: ดึงรายชื่อผู้ใช้งานทั้งหมด
     if (method === 'GET') {
       const mode = url.searchParams.get('mode');
       if (mode === 'units') {
@@ -72,8 +41,13 @@ export async function onRequest(context) {
         return {
           ...u,
           phone: pVal,
-          pin: String(u[pinCol] || u.pin || u.password || ''),
+          pin: String(u.pin || u.password || '123456'),
+          rank: u.rank || '',
           name_surname: u.name_surname || u.full_name || '',
+          role: u.role || 'unit',
+          army_region: u.army_region || '',
+          unit_name: u.unit_name || '',
+          is_active: u.is_active !== false,
           id: u.id || u.user_id || pVal
         };
       });
@@ -88,11 +62,15 @@ export async function onRequest(context) {
       return new Response(JSON.stringify({ success: true, users: normalized }), { headers });
     }
 
-    // 2. POST: เพิ่มผู้ใช้งานใหม่ หรือ นำเข้าชุดใหญ่
     if (method === 'POST') {
       const body = await request.json();
 
       if (body.action === 'bulk_import' && Array.isArray(body.records)) {
+        const allRows = await sql`SELECT * FROM users`;
+        const existingPhones = new Set(
+          allRows.map(r => getPhoneVal(r).replace(/[^0-9]/g, '')).filter(Boolean)
+        );
+
         let importedCount = 0;
         let updatedCount = 0;
 
@@ -112,58 +90,25 @@ export async function onRequest(context) {
           const rankVal = String(item.rank || '').trim();
           const nameVal = String(item.name_surname || '').trim();
 
-          const allRows = await sql`SELECT * FROM users`;
-          const matched = allRows.find(r => getPhoneVal(r).replace(/[^0-9]/g, '') === cleanPhone);
-
-          if (matched) {
-            if (phoneCol === 'phone') {
-              try {
-                await sql`
-                  UPDATE users
-                  SET rank = ${rankVal},
-                      role = ${role},
-                      army_region = ${cleanRegion},
-                      unit_name = ${rawUnit},
-                      is_active = true
-                  WHERE phone = ${cleanPhone}
-                `;
-              } catch (_) {
-                await sql`
-                  UPDATE users
-                  SET rank = ${rankVal},
-                      role = ${role},
-                      army_region = ${cleanRegion}
-                  WHERE phone = ${cleanPhone}
-                `;
-              }
-              if (nameCol === 'name_surname') {
-                await sql`UPDATE users SET name_surname = ${nameVal} WHERE phone = ${cleanPhone}`;
-              } else if (nameCol === 'full_name') {
-                await sql`UPDATE users SET full_name = ${nameVal} WHERE phone = ${cleanPhone}`;
-              }
-              await setPinByPhone(cleanPhone, pin);
-            }
+          if (existingPhones.has(cleanPhone)) {
+            await sql`
+              UPDATE users
+              SET pin = ${pin},
+                  rank = ${rankVal},
+                  name_surname = ${nameVal},
+                  role = ${role},
+                  army_region = ${cleanRegion},
+                  unit_name = ${rawUnit},
+                  is_active = true
+              WHERE phone = ${cleanPhone}
+            `;
             updatedCount++;
           } else {
-            if (phoneCol === 'phone') {
-              try {
-                await sql`
-                  INSERT INTO users (phone, rank, role, army_region, unit_name, is_active)
-                  VALUES (${cleanPhone}, ${rankVal}, ${role}, ${cleanRegion}, ${rawUnit}, true)
-                `;
-              } catch (_) {
-                await sql`
-                  INSERT INTO users (phone, rank, role, army_region)
-                  VALUES (${cleanPhone}, ${rankVal}, ${role}, ${cleanRegion})
-                `;
-              }
-              if (nameCol === 'name_surname') {
-                await sql`UPDATE users SET name_surname = ${nameVal} WHERE phone = ${cleanPhone}`;
-              } else if (nameCol === 'full_name') {
-                await sql`UPDATE users SET full_name = ${nameVal} WHERE phone = ${cleanPhone}`;
-              }
-              await setPinByPhone(cleanPhone, pin);
-            }
+            await sql`
+              INSERT INTO users (phone, pin, rank, name_surname, role, army_region, unit_name, is_active)
+              VALUES (${cleanPhone}, ${pin}, ${rankVal}, ${nameVal}, ${role}, ${cleanRegion}, ${rawUnit}, true)
+            `;
+            existingPhones.add(cleanPhone);
             importedCount++;
           }
         }
@@ -182,9 +127,8 @@ export async function onRequest(context) {
         );
       }
 
-      const allRows = await sql`SELECT * FROM users`;
-      const dup = allRows.find(r => getPhoneVal(r).replace(/[^0-9]/g, '') === cleanPhone);
-      if (dup) {
+      const dup = await sql`SELECT phone FROM users WHERE phone = ${cleanPhone} LIMIT 1`;
+      if (dup.length > 0) {
         return new Response(
           JSON.stringify({ success: false, error: 'เบอร์โทรศัพท์นี้มีอยู่ในระบบแล้ว' }),
           { status: 400, headers }
@@ -192,28 +136,23 @@ export async function onRequest(context) {
       }
 
       const pin = String(body.pin || '123456').trim() || '123456';
-      try {
-        await sql`
-          INSERT INTO users (phone, rank, role, army_region, is_active)
-          VALUES (${cleanPhone}, ${body.rank || ''}, ${body.role || 'unit'}, ${body.army_region || ''}, true)
-        `;
-      } catch (_) {
-        await sql`
-          INSERT INTO users (phone, rank, role, army_region)
-          VALUES (${cleanPhone}, ${body.rank || ''}, ${body.role || 'unit'}, ${body.army_region || ''})
-        `;
-      }
-      if (nameCol === 'name_surname') {
-        await sql`UPDATE users SET name_surname = ${body.name_surname} WHERE phone = ${cleanPhone}`;
-      } else if (nameCol === 'full_name') {
-        await sql`UPDATE users SET full_name = ${body.name_surname} WHERE phone = ${cleanPhone}`;
-      }
-      await setPinByPhone(cleanPhone, pin);
+      await sql`
+        INSERT INTO users (phone, pin, rank, name_surname, role, army_region, unit_name, is_active)
+        VALUES (
+          ${cleanPhone},
+          ${pin},
+          ${body.rank || ''},
+          ${body.name_surname || ''},
+          ${body.role || 'unit'},
+          ${body.army_region || ''},
+          ${body.unit_name || ''},
+          true
+        )
+      `;
 
       return new Response(JSON.stringify({ success: true }), { headers });
     }
 
-    // 3. PUT: แก้ไขข้อมูล / รีเซ็ต PIN / เปิด-ปิดสถานะ
     if (method === 'PUT') {
       const body = await request.json();
       const targetPhone = String(body.phone || body.id || '').replace(/[^0-9]/g, '');
@@ -222,7 +161,7 @@ export async function onRequest(context) {
       }
 
       if (body.action === 'reset_pin') {
-        await setPinByPhone(targetPhone, String(body.pin || '123456').trim());
+        await sql`UPDATE users SET pin = ${String(body.pin || '123456').trim()} WHERE phone = ${targetPhone}`;
         return new Response(JSON.stringify({ success: true }), { headers });
       }
 
@@ -231,26 +170,32 @@ export async function onRequest(context) {
         return new Response(JSON.stringify({ success: true }), { headers });
       }
 
-      await sql`
-        UPDATE users
-        SET rank = ${body.rank || ''},
-            role = ${body.role || 'unit'},
-            army_region = ${body.army_region || ''}
-        WHERE phone = ${targetPhone}
-      `;
       if (body.pin && String(body.pin).trim() !== '') {
-        await setPinByPhone(targetPhone, String(body.pin).trim());
-      }
-      if (nameCol === 'name_surname') {
-        await sql`UPDATE users SET name_surname = ${body.name_surname || ''} WHERE phone = ${targetPhone}`;
-      } else if (nameCol === 'full_name') {
-        await sql`UPDATE users SET full_name = ${body.name_surname || ''} WHERE phone = ${targetPhone}`;
+        await sql`
+          UPDATE users
+          SET pin = ${String(body.pin).trim()},
+              rank = ${body.rank || ''},
+              name_surname = ${body.name_surname || ''},
+              role = ${body.role || 'unit'},
+              army_region = ${body.army_region || ''},
+              unit_name = ${body.unit_name || ''}
+          WHERE phone = ${targetPhone}
+        `;
+      } else {
+        await sql`
+          UPDATE users
+          SET rank = ${body.rank || ''},
+              name_surname = ${body.name_surname || ''},
+              role = ${body.role || 'unit'},
+              army_region = ${body.army_region || ''},
+              unit_name = ${body.unit_name || ''}
+          WHERE phone = ${targetPhone}
+        `;
       }
 
       return new Response(JSON.stringify({ success: true }), { headers });
     }
 
-    // 4. DELETE: ลบผู้ใช้งาน
     if (method === 'DELETE') {
       const idOrPhone = String(url.searchParams.get('id') || '').replace(/[^0-9]/g, '');
       if (!idOrPhone) return new Response(JSON.stringify({ success: false, error: 'ไม่พบข้อมูลที่ต้องการลบ' }), { status: 400, headers });
