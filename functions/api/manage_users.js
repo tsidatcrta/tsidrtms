@@ -40,7 +40,6 @@ export async function onRequest(context) {
 
     const getPhoneVal = (row) => String(row[phoneCol] || row.phone || row.username || '').trim();
 
-    // 1. GET: ดึงรายชื่อผู้ใช้งานทั้งหมด
     if (method === 'GET') {
       const mode = url.searchParams.get('mode');
       if (mode === 'units') {
@@ -68,7 +67,6 @@ export async function onRequest(context) {
       return new Response(JSON.stringify({ success: true, users: normalized }), { headers });
     }
 
-    // 2. POST: เพิ่มผู้ใช้งานใหม่ หรือ นำเข้าชุดใหญ่
     if (method === 'POST') {
       const body = await request.json();
 
@@ -190,7 +188,58 @@ export async function onRequest(context) {
       return new Response(JSON.stringify({ success: true }), { headers });
     }
 
-    // 3. PUT: แก้ไขข้อมูล / รีเซ็ต PIN / เปิด-ปิดสถานะ
     if (method === 'PUT') {
       const body = await request.json();
-      const targetPhone = String(body.
+      const targetPhone = String(body.phone || body.id || '').replace(/[^0-9]/g, '');
+      if (!targetPhone) {
+        return new Response(JSON.stringify({ success: false, error: 'ไม่พบเบอร์โทรศัพท์อ้างอิง' }), { status: 400, headers });
+      }
+
+      if (body.action === 'reset_pin') {
+        await sql`UPDATE users SET pin = ${String(body.pin || '123456').trim()} WHERE phone = ${targetPhone}`;
+        return new Response(JSON.stringify({ success: true }), { headers });
+      }
+
+      if (body.action === 'toggle_status') {
+        await sql`UPDATE users SET is_active = ${Boolean(body.is_active)} WHERE phone = ${targetPhone}`;
+        return new Response(JSON.stringify({ success: true }), { headers });
+      }
+
+      await sql`
+        UPDATE users
+        SET rank = ${body.rank || ''},
+            role = ${body.role || 'unit'},
+            army_region = ${body.army_region || ''}
+        WHERE phone = ${targetPhone}
+      `;
+      if (body.pin && String(body.pin).trim() !== '') {
+        await sql`UPDATE users SET pin = ${String(body.pin).trim()} WHERE phone = ${targetPhone}`;
+      }
+      if (nameCol === 'name_surname') {
+        await sql`UPDATE users SET name_surname = ${body.name_surname || ''} WHERE phone = ${targetPhone}`;
+      } else if (nameCol === 'full_name') {
+        await sql`UPDATE users SET full_name = ${body.name_surname || ''} WHERE phone = ${targetPhone}`;
+      }
+
+      return new Response(JSON.stringify({ success: true }), { headers });
+    }
+
+    if (method === 'DELETE') {
+      const idOrPhone = String(url.searchParams.get('id') || '').replace(/[^0-9]/g, '');
+      if (!idOrPhone) return new Response(JSON.stringify({ success: false, error: 'ไม่พบข้อมูลที่ต้องการลบ' }), { status: 400, headers });
+      if (idOrPhone === '0800000000') {
+        return new Response(JSON.stringify({ success: false, error: 'ไม่สามารถลบบัญชีแอดมินหลักได้' }), { status: 403, headers });
+      }
+
+      await sql`DELETE FROM users WHERE phone = ${idOrPhone}`;
+      return new Response(JSON.stringify({ success: true }), { headers });
+    }
+
+    return new Response(JSON.stringify({ success: false, error: 'Method not allowed' }), { status: 405, headers });
+  } catch (err) {
+    return new Response(
+      JSON.stringify({ success: false, error: err.message }),
+      { status: 500, headers }
+    );
+  }
+}
