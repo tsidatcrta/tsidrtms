@@ -309,18 +309,27 @@
       return result;
     }
 
-    function parseBulkOrCsvText(text) {
+function parseBulkOrCsvText(text) {
       const cleanText = String(text || '').replace(/^\uFEFF/, '');
       const lines = cleanText.split(/\r?\n/).filter(l => l.trim() !== '');
       if (lines.length === 0) return [];
 
       const firstCols = lines[0].includes('\t') ? lines[0].split('\t').map(s => s.trim()) : splitCsvLine(lines[0]);
-      const lowerHeaders = firstCols.map(h => h.toLowerCase());
+      const lowerHeaders = firstCols.map(h => h.toLowerCase().replace(/\s+/g, '_'));
       const hasNamedHeader = lowerHeaders.some(h =>
-        ['phone', 'phone_number', 'tel', 'เบอร์โทร', 'เบอร์โทรศัพท์', 'name_surname', 'ชื่อ-สกุล', 'ชื่อ'].includes(h)
+        ['phone', 'phone_number', 'tel', 'เบอร์โทร', 'เบอร์โทรศัพท์', 'name_surname', 'ชื่อ-สกุล', 'ชื่อ', 'unit_name', 'หน่วยฝึก', 'หน่วย'].includes(h)
       );
 
       const dataLines = hasNamedHeader ? lines.slice(1) : lines;
+
+      const pickField = (obj, keys) => {
+        for (const k of keys) {
+          if (obj[k] !== undefined && String(obj[k]).trim() !== '') {
+            return String(obj[k]).trim();
+          }
+        }
+        return '';
+      };
 
       return dataLines.map(line => {
         const cols = line.includes('\t') ? line.split('\t').map(s => s.trim()) : splitCsvLine(line);
@@ -329,17 +338,18 @@
           lowerHeaders.forEach((h, idx) => {
             obj[h] = cols[idx] ?? '';
           });
-          const rawPhone = obj.phone || obj.phone_number || obj.tel || obj['เบอร์โทร'] || obj['เบอร์โทรศัพท์'] || '';
+          const rawPhone = pickField(obj, ['phone', 'phone_number', 'tel', 'เบอร์โทร', 'เบอร์โทรศัพท์']);
           const cleanPhone = rawPhone.replace(/[^0-9]/g, '');
-          const rawRole = (obj.role || obj['สิทธิ์'] || obj['ระดับสิทธิ์'] || 'unit').toLowerCase();
+          const rawRole = pickField(obj, ['role', 'สิทธิ์', 'ระดับสิทธิ์']).toLowerCase();
+          const unitVal = pickField(obj, ['unit_name', 'raw_unit', 'unit', 'หน่วยฝึก', 'หน่วย', 'ชื่อหน่วย', 'สังกัดหน่วย']);
           return {
             phone: cleanPhone,
-            rank: obj.rank || obj['ยศ'] || '',
-            name_surname: obj.name_surname || obj.full_name || obj['ชื่อ-สกุล'] || obj['ชื่อ'] || '',
-            army_region: obj.army_region || obj['กองทัพภาค'] || obj['สังกัด'] || '',
-            unit_name: obj.unit_name || obj.raw_unit || obj['หน่วยฝึก'] || obj['หน่วย'] || '',
+            rank: pickField(obj, ['rank', 'ยศ', 'คำนำหน้า']),
+            name_surname: pickField(obj, ['name_surname', 'full_name', 'ชื่อ-สกุล', 'ชื่อ', 'ชื่อ_นามสกุล']),
+            army_region: pickField(obj, ['army_region', 'กองทัพภาค', 'สังกัด']),
+            unit_name: unitVal,
             role: ['admin', 'command', 'unit'].includes(rawRole) ? rawRole : 'unit',
-            pin: obj.pin || '123456'
+            pin: pickField(obj, ['pin', 'รหัส_pin', 'รหัสpin']) || '123456'
           };
         } else {
           const [phone, rank, name_surname, army_region, raw_unit, role, pin] = cols;
