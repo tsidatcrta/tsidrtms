@@ -247,7 +247,82 @@
         alert('เกิดข้อผิดพลาดในการโหลดข้อมูล: ' + e.message);
       }
     }
+/////
 
+function parseCsvText(text) {
+  const cleanText = String(text || '').replace(/^\uFEFF/, '');
+  const lines = cleanText.split(/\r?\n/).filter(l => l.trim() !== '');
+  if (lines.length < 2) return [];
+
+  const splitCsvLine = (line) => {
+    const result = [];
+    let cur = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (inQuotes && line[i + 1] === '"') {
+          cur += '"';
+          i++;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (ch === ',' && !inQuotes) {
+        result.push(cur.trim());
+        cur = '';
+      } else {
+        cur += ch;
+      }
+    }
+    result.push(cur.trim());
+    return result;
+  };
+
+  const headers = splitCsvLine(lines[0]).map(h => h.toLowerCase());
+  return lines.slice(1).map(line => {
+    const cols = splitCsvLine(line);
+    const obj = {};
+    headers.forEach((h, idx) => {
+      obj[h] = cols[idx] ?? '';
+    });
+    return {
+      phone: obj.phone || obj.phone_number || obj.tel || '',
+      pin: obj.pin || '123456',
+      rank: obj.rank || '',
+      name_surname: obj.name_surname || obj.full_name || '',
+      role: obj.role || 'unit',
+      army_region: obj.army_region || '',
+      unit_name: obj.unit_name || obj.raw_unit || ''
+    };
+  });
+}
+
+async function importUsersFromCsvFile(file, batchSize = 15) {
+  const text = await file.text();
+  const records = parseCsvText(text);
+  let totalImported = 0;
+  let totalUpdated = 0;
+
+  for (let i = 0; i < records.length; i += batchSize) {
+    const chunk = records.slice(i, i + batchSize);
+    const res = await fetch('/api/manage_users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'bulk_import', records: chunk })
+    });
+    const data = await res.json();
+    if (!data.success) {
+      throw new Error(data.error || 'นำเข้าข้อมูลบางส่วนไม่สำเร็จ');
+    }
+    totalImported += Number(data.importedCount || 0);
+    totalUpdated += Number(data.updatedCount || 0);
+  }
+
+  return { totalImported, totalUpdated };
+}
+    
+////
+    
     function updateStats() {
       document.getElementById('stat-total').textContent = allUsers.length.toLocaleString();
       document.getElementById('stat-admin').textContent = allUsers.filter(u => u.role === 'admin').length.toLocaleString();
