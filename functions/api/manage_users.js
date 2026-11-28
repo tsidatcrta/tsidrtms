@@ -43,6 +43,16 @@ export async function onRequest(context) {
       return '123456';
     };
 
+    const getUnitVal = (row) => {
+      for (const c of ['unit_name', 'raw_unit', 'unit', 'unit_title', 'training_unit']) {
+        if (row[c] !== undefined && row[c] !== null && String(row[c]).trim() !== '') {
+          const val = String(row[c]).trim();
+          if (val !== '-' && val !== 'ส่วนกลาง') return val;
+        }
+      }
+      return '';
+    };
+
     const normalizeRole = (rawRole) => {
       const r = String(rawRole || '').trim().toLowerCase();
       if (['admin', 'ผู้ดูแลระบบ', 'แอดมิน'].includes(r)) return 'admin';
@@ -72,7 +82,7 @@ export async function onRequest(context) {
         cleanRegion = cleanRegion.split(':').pop().trim();
       }
 
-      const unitVal = String(raw.raw_unit || raw.unit_name || '').trim();
+      const unitVal = getUnitVal(raw);
       const rankVal = String(raw.rank || '').trim();
       const nameVal = String(raw.name_surname || raw.full_name || '').trim();
       const { firstName, lastName } = splitName(nameVal || rankVal || cleanPhone);
@@ -201,7 +211,7 @@ export async function onRequest(context) {
                   last_name = CASE WHEN ${hasLastName} THEN ${rec.lastVal} ELSE last_name END,
                   role = CASE WHEN ${hasRole} THEN ${rec.roleVal} ELSE role END,
                   army_region = CASE WHEN ${hasRegion} THEN ${rec.cleanRegion} ELSE army_region END,
-                  unit_name = CASE WHEN ${hasUnitName} THEN ${rec.unitVal} ELSE unit_name END,
+                  unit_name = CASE WHEN ${hasUnitName} AND ${rec.unitVal} <> '' THEN ${rec.unitVal} ELSE unit_name END,
                   is_active = CASE WHEN ${hasActive} THEN ${rec.activeVal} ELSE is_active END
               WHERE phone = ${rec.cleanPhone} OR phone_number = ${rec.cleanPhone}
             `;
@@ -322,6 +332,7 @@ export async function onRequest(context) {
         : (current.name_surname || current.full_name || '');
       const { firstName, lastName } = splitName(nextName);
       const nextRole = body.role !== undefined ? normalizeRole(body.role) : normalizeRole(current.role);
+      const nextUnit = body.unit_name !== undefined ? String(body.unit_name).trim() : (current.unit_name || '');
 
       await sql`
         UPDATE users
@@ -335,7 +346,7 @@ export async function onRequest(context) {
             last_name = ${body.last_name !== undefined ? String(body.last_name).trim() : (lastName || current.last_name || '')},
             role = ${nextRole},
             army_region = ${body.army_region !== undefined ? String(body.army_region).trim() : (current.army_region || '')},
-            unit_name = ${body.unit_name !== undefined ? String(body.unit_name).trim() : (current.unit_name || '')}
+            unit_name = ${nextUnit}
         WHERE phone = ${targetPhone} OR phone_number = ${targetPhone}
       `;
 
