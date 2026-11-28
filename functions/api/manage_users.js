@@ -18,15 +18,7 @@ export async function onRequest(context) {
   }
 
   try {
-    // ตรวจสอบชื่อคอลัมน์ที่มีอยู่จริงในตาราง users
-    const colsInfo = await sql`
-      SELECT column_name 
-      FROM information_schema.columns 
-      WHERE table_name = 'users'
-    `;
-    const validCols = new Set(colsInfo.map(c => c.column_name));
-
-    // 1. GET: ดึงรายชื่อผู้ใช้งานทั้งหมด
+    // 1. GET: ดึงรายชื่อผู้ใช้งานทั้งหมด (ไม่เรียกหาคอลัมน์ id)
     if (method === 'GET') {
       const mode = url.searchParams.get('mode');
       if (mode === 'units') {
@@ -39,7 +31,6 @@ export async function onRequest(context) {
         id: u.id || u.user_id || u.phone
       }));
 
-      // เรียงลำดับใน JS เพื่อไม่ให้ติด Error คอลัมน์ใน SQL
       const roleOrder = { admin: 1, command: 2, unit: 3 };
       normalized.sort((a, b) => (roleOrder[a.role] || 9) - (roleOrder[b.role] || 9));
 
@@ -67,42 +58,35 @@ export async function onRequest(context) {
           }
 
           const rawUnit = String(item.raw_unit || item.unit_name || '').trim();
-          const nameCol = validCols.has('name_surname') ? 'name_surname' : 'full_name';
+          const rankVal = item.rank || '';
+          const nameVal = item.name_surname || '';
 
           const existing = await sql`SELECT phone FROM users WHERE phone = ${cleanPhone} LIMIT 1`;
           if (existing.length > 0) {
-            if (validCols.has('unit_name') && validCols.has('is_active')) {
+            try {
               await sql`
                 UPDATE users 
-                SET rank = ${item.rank || ''},
-                    ${sql(nameCol)} = ${item.name_surname || ''},
-                    role = ${role},
-                    army_region = ${cleanRegion},
-                    unit_name = ${rawUnit},
-                    is_active = true
+                SET rank = ${rankVal}, name_surname = ${nameVal}, role = ${role}, army_region = ${cleanRegion}, unit_name = ${rawUnit}, is_active = true
                 WHERE phone = ${cleanPhone}
               `;
-            } else {
+            } catch (_) {
               await sql`
                 UPDATE users 
-                SET rank = ${item.rank || ''},
-                    ${sql(nameCol)} = ${item.name_surname || ''},
-                    role = ${role},
-                    army_region = ${cleanRegion}
+                SET rank = ${rankVal}, name_surname = ${nameVal}, role = ${role}, army_region = ${cleanRegion}
                 WHERE phone = ${cleanPhone}
               `;
             }
             updatedCount++;
           } else {
-            if (validCols.has('unit_name') && validCols.has('is_active')) {
+            try {
               await sql`
-                INSERT INTO users (phone, pin, rank, ${sql(nameCol)}, role, army_region, unit_name, is_active)
-                VALUES (${cleanPhone}, ${pin}, ${item.rank || ''}, ${item.name_surname || ''}, ${role}, ${cleanRegion}, ${rawUnit}, true)
+                INSERT INTO users (phone, pin, rank, name_surname, role, army_region, unit_name, is_active)
+                VALUES (${cleanPhone}, ${pin}, ${rankVal}, ${nameVal}, ${role}, ${cleanRegion}, ${rawUnit}, true)
               `;
-            } else {
+            } catch (_) {
               await sql`
-                INSERT INTO users (phone, pin, rank, ${sql(nameCol)}, role, army_region)
-                VALUES (${cleanPhone}, ${pin}, ${item.rank || ''}, ${item.name_surname || ''}, ${role}, ${cleanRegion})
+                INSERT INTO users (phone, pin, rank, name_surname, role, army_region)
+                VALUES (${cleanPhone}, ${pin}, ${rankVal}, ${nameVal}, ${role}, ${cleanRegion})
               `;
             }
             importedCount++;
@@ -133,16 +117,14 @@ export async function onRequest(context) {
       }
 
       const pin = String(body.pin || '123456').trim() || '123456';
-      const nameCol = validCols.has('name_surname') ? 'name_surname' : 'full_name';
-
-      if (validCols.has('is_active')) {
+      try {
         await sql`
-          INSERT INTO users (phone, pin, rank, ${sql(nameCol)}, role, army_region, is_active)
+          INSERT INTO users (phone, pin, rank, name_surname, role, army_region, is_active)
           VALUES (${cleanPhone}, ${pin}, ${body.rank || ''}, ${body.name_surname}, ${body.role || 'unit'}, ${body.army_region || ''}, true)
         `;
-      } else {
+      } catch (_) {
         await sql`
-          INSERT INTO users (phone, pin, rank, ${sql(nameCol)}, role, army_region)
+          INSERT INTO users (phone, pin, rank, name_surname, role, army_region)
           VALUES (${cleanPhone}, ${pin}, ${body.rank || ''}, ${body.name_surname}, ${body.role || 'unit'}, ${body.army_region || ''})
         `;
       }
@@ -163,29 +145,21 @@ export async function onRequest(context) {
         return new Response(JSON.stringify({ success: true }), { headers });
       }
 
-      if (body.action === 'toggle_status' && validCols.has('is_active')) {
+      if (body.action === 'toggle_status') {
         await sql`UPDATE users SET is_active = ${Boolean(body.is_active)} WHERE phone = ${targetPhone}`;
         return new Response(JSON.stringify({ success: true }), { headers });
       }
 
-      const nameCol = validCols.has('name_surname') ? 'name_surname' : 'full_name';
       if (body.pin && String(body.pin).trim() !== '') {
         await sql`
           UPDATE users
-          SET pin = ${String(body.pin).trim()},
-              rank = ${body.rank || ''},
-              ${sql(nameCol)} = ${body.name_surname || ''},
-              role = ${body.role || 'unit'},
-              army_region = ${body.army_region || ''}
+          SET pin = ${String(body.pin).trim()}, rank = ${body.rank || ''}, name_surname = ${body.name_surname || ''}, role = ${body.role || 'unit'}, army_region = ${body.army_region || ''}
           WHERE phone = ${targetPhone}
         `;
       } else {
         await sql`
           UPDATE users
-          SET rank = ${body.rank || ''},
-              ${sql(nameCol)} = ${body.name_surname || ''},
-              role = ${body.role || 'unit'},
-              army_region = ${body.army_region || ''}
+          SET rank = ${body.rank || ''}, name_surname = ${body.name_surname || ''}, role = ${body.role || 'unit'}, army_region = ${body.army_region || ''}
           WHERE phone = ${targetPhone}
         `;
       }
