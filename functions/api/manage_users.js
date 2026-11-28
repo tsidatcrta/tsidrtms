@@ -18,45 +18,46 @@ export async function onRequest(context) {
   }
 
   try {
-    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT`;
-    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number TEXT`;
-    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS pin TEXT DEFAULT '123456'`;
-    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_hash TEXT DEFAULT '123456'`;
-    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS rank TEXT DEFAULT ''`;
-    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS name_surname TEXT DEFAULT ''`;
-    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT DEFAULT ''`;
-    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name TEXT DEFAULT ''`;
-    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'unit'`;
-    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS army_region TEXT DEFAULT ''`;
-    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS unit_name TEXT DEFAULT ''`;
-    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true`;
-
-    // ล้าง constraint เดิม แปลงค่า role ของแถวเดิมให้ถูกต้องก่อน แล้วค่อยสร้างและ validate constraint
-    await sql`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`;
-    await sql`
-      UPDATE users
-      SET role = CASE
-        WHEN lower(trim(COALESCE(role, ''))) IN ('admin', 'ผู้ดูแลระบบ', 'แอดมิน') THEN 'admin'
-        WHEN lower(trim(COALESCE(role, ''))) IN ('command', 'ทภ.', 'นขต.ทบ.', 'ผู้บังคับบัญชา', 'commander') THEN 'command'
-        WHEN lower(trim(COALESCE(role, ''))) IN ('trainer', 'ผู้ฝึก', 'ครูฝึก') THEN 'trainer'
-        WHEN lower(trim(COALESCE(role, ''))) IN ('user', 'หน่วย', 'หน่วยฝึก', 'unit', 'viewer', 'staff', '') THEN 'unit'
-        ELSE 'unit'
-      END
-    `;
-    await sql`
-      ALTER TABLE users
-      ADD CONSTRAINT users_role_check
-      CHECK (role IN ('admin', 'command', 'unit', 'user', 'trainer', 'commander', 'viewer', 'staff'))
-      NOT VALID
-    `;
-    await sql`ALTER TABLE users VALIDATE CONSTRAINT users_role_check`;
-
     const colsRows = await sql`
       SELECT column_name
       FROM information_schema.columns
       WHERE table_schema = 'public' AND table_name = 'users'
     `;
     const colSet = new Set(colsRows.map(r => r.column_name));
+
+    const requiredCols = [
+      ['phone', 'TEXT'],
+      ['phone_number', 'TEXT'],
+      ['pin', "TEXT DEFAULT '123456'"],
+      ['pin_hash', "TEXT DEFAULT '123456'"],
+      ['rank', "TEXT DEFAULT ''"],
+      ['name_surname', "TEXT DEFAULT ''"],
+      ['first_name', "TEXT DEFAULT ''"],
+      ['last_name', "TEXT DEFAULT ''"],
+      ['role', "TEXT DEFAULT 'unit'"],
+      ['army_region', "TEXT DEFAULT ''"],
+      ['unit_name', "TEXT DEFAULT ''"],
+      ['is_active', 'BOOLEAN DEFAULT true']
+    ];
+
+    for (const [colName, ddl] of requiredCols) {
+      if (!colSet.has(colName)) {
+        await sql`SELECT 1`;
+        if (colName === 'phone') await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT`;
+        else if (colName === 'phone_number') await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number TEXT`;
+        else if (colName === 'pin') await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS pin TEXT DEFAULT '123456'`;
+        else if (colName === 'pin_hash') await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_hash TEXT DEFAULT '123456'`;
+        else if (colName === 'rank') await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS rank TEXT DEFAULT ''`;
+        else if (colName === 'name_surname') await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS name_surname TEXT DEFAULT ''`;
+        else if (colName === 'first_name') await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT DEFAULT ''`;
+        else if (colName === 'last_name') await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name TEXT DEFAULT ''`;
+        else if (colName === 'role') await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'unit'`;
+        else if (colName === 'army_region') await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS army_region TEXT DEFAULT ''`;
+        else if (colName === 'unit_name') await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS unit_name TEXT DEFAULT ''`;
+        else if (colName === 'is_active') await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true`;
+        colSet.add(colName);
+      }
+    }
 
     const getPhoneVal = (row) => {
       for (const c of ['phone', 'phone_number', 'username', 'tel']) {
@@ -95,7 +96,7 @@ export async function onRequest(context) {
       };
     };
 
-    const upsertUserRecord = async (raw) => {
+    const normalizeRecord = (raw) => {
       const cleanPhone = String(raw.phone || raw.phone_number || raw.id || '').replace(/[^0-9]/g, '');
       const pinVal = String(raw.pin || raw.pin_hash || '123456').trim() || '123456';
       const roleVal = normalizeRole(raw.role);
@@ -113,56 +114,18 @@ export async function onRequest(context) {
       const lastVal = String(raw.last_name || lastName || '').trim();
       const activeVal = raw.is_active !== undefined ? Boolean(raw.is_active) : true;
 
-      const existing = await sql`
-        SELECT *
-        FROM users
-        WHERE phone = ${cleanPhone} OR phone_number = ${cleanPhone}
-        LIMIT 1
-      `;
-
-      if (existing.length > 0) {
-        await sql`
-          UPDATE users
-          SET phone = ${cleanPhone},
-              phone_number = ${cleanPhone},
-              pin = ${pinVal},
-              pin_hash = ${pinVal},
-              rank = ${rankVal},
-              name_surname = ${nameVal},
-              first_name = ${firstVal},
-              last_name = ${lastVal},
-              role = ${roleVal},
-              army_region = ${cleanRegion},
-              unit_name = ${unitVal},
-              is_active = ${activeVal}
-          WHERE phone = ${cleanPhone} OR phone_number = ${cleanPhone}
-        `;
-        if (colSet.has('full_name')) {
-          await sql`
-            UPDATE users
-            SET full_name = COALESCE(NULLIF(full_name, ''), ${nameVal})
-            WHERE phone = ${cleanPhone} OR phone_number = ${cleanPhone}
-          `;
-        }
-        return 'updated';
-      } else {
-        await sql`
-          INSERT INTO users (
-            phone, phone_number, pin, pin_hash, rank, name_surname, first_name, last_name, role, army_region, unit_name, is_active
-          )
-          VALUES (
-            ${cleanPhone}, ${cleanPhone}, ${pinVal}, ${pinVal}, ${rankVal}, ${nameVal}, ${firstVal}, ${lastVal}, ${roleVal}, ${cleanRegion}, ${unitVal}, ${activeVal}
-          )
-        `;
-        if (colSet.has('full_name')) {
-          await sql`
-            UPDATE users
-            SET full_name = ${nameVal}
-            WHERE phone = ${cleanPhone} OR phone_number = ${cleanPhone}
-          `;
-        }
-        return 'inserted';
-      }
+      return {
+        cleanPhone,
+        pinVal,
+        roleVal,
+        cleanRegion,
+        unitVal,
+        rankVal,
+        nameVal,
+        firstVal,
+        lastVal,
+        activeVal
+      };
     };
 
     if (method === 'GET') {
@@ -206,16 +169,68 @@ export async function onRequest(context) {
       const body = await request.json();
 
       if (body.action === 'bulk_import' && Array.isArray(body.records)) {
+        const dedupMap = new Map();
+        for (const item of body.records) {
+          const rec = normalizeRecord(item);
+          if (rec.cleanPhone.length >= 9) {
+            dedupMap.set(rec.cleanPhone, rec);
+          }
+        }
+
+        const allRows = await sql`SELECT * FROM users`;
+        const existingPhones = new Set(
+          allRows.map(r => getPhoneVal(r).replace(/[^0-9]/g, '')).filter(Boolean)
+        );
+
         let importedCount = 0;
         let updatedCount = 0;
+        const hasFullName = colSet.has('full_name');
 
-        for (const item of body.records) {
-          const cleanPhone = String(item.phone || item.phone_number || '').replace(/[^0-9]/g, '');
-          if (cleanPhone.length < 9) continue;
-
-          const status = await upsertUserRecord(item);
-          if (status === 'inserted') importedCount++;
-          else updatedCount++;
+        for (const rec of dedupMap.values()) {
+          if (existingPhones.has(rec.cleanPhone)) {
+            await sql`
+              UPDATE users
+              SET phone = ${rec.cleanPhone},
+                  phone_number = ${rec.cleanPhone},
+                  pin = ${rec.pinVal},
+                  pin_hash = ${rec.pinVal},
+                  rank = ${rec.rankVal},
+                  name_surname = ${rec.nameVal},
+                  first_name = ${rec.firstVal},
+                  last_name = ${rec.lastVal},
+                  role = ${rec.roleVal},
+                  army_region = ${rec.cleanRegion},
+                  unit_name = ${rec.unitVal},
+                  is_active = ${rec.activeVal}
+              WHERE phone = ${rec.cleanPhone} OR phone_number = ${rec.cleanPhone}
+            `;
+            if (hasFullName) {
+              await sql`
+                UPDATE users
+                SET full_name = COALESCE(NULLIF(full_name, ''), ${rec.nameVal})
+                WHERE phone = ${rec.cleanPhone} OR phone_number = ${rec.cleanPhone}
+              `;
+            }
+            updatedCount++;
+          } else {
+            await sql`
+              INSERT INTO users (
+                phone, phone_number, pin, pin_hash, rank, name_surname, first_name, last_name, role, army_region, unit_name, is_active
+              )
+              VALUES (
+                ${rec.cleanPhone}, ${rec.cleanPhone}, ${rec.pinVal}, ${rec.pinVal}, ${rec.rankVal}, ${rec.nameVal}, ${rec.firstVal}, ${rec.lastVal}, ${rec.roleVal}, ${rec.cleanRegion}, ${rec.unitVal}, ${rec.activeVal}
+              )
+            `;
+            if (hasFullName) {
+              await sql`
+                UPDATE users
+                SET full_name = ${rec.nameVal}
+                WHERE phone = ${rec.cleanPhone} OR phone_number = ${rec.cleanPhone}
+              `;
+            }
+            existingPhones.add(rec.cleanPhone);
+            importedCount++;
+          }
         }
 
         return new Response(
@@ -224,8 +239,8 @@ export async function onRequest(context) {
         );
       }
 
-      const cleanPhone = String(body.phone || body.phone_number || '').replace(/[^0-9]/g, '');
-      if (!cleanPhone || !body.name_surname) {
+      const rec = normalizeRecord(body);
+      if (!rec.cleanPhone || !rec.nameVal) {
         return new Response(
           JSON.stringify({ success: false, error: 'กรุณากรอกเบอร์โทรศัพท์และชื่อ-สกุลให้ครบถ้วน' }),
           { status: 400, headers }
@@ -235,7 +250,7 @@ export async function onRequest(context) {
       const dup = await sql`
         SELECT phone
         FROM users
-        WHERE phone = ${cleanPhone} OR phone_number = ${cleanPhone}
+        WHERE phone = ${rec.cleanPhone} OR phone_number = ${rec.cleanPhone}
         LIMIT 1
       `;
       if (dup.length > 0) {
@@ -245,7 +260,22 @@ export async function onRequest(context) {
         );
       }
 
-      await upsertUserRecord(body);
+      await sql`
+        INSERT INTO users (
+          phone, phone_number, pin, pin_hash, rank, name_surname, first_name, last_name, role, army_region, unit_name, is_active
+        )
+        VALUES (
+          ${rec.cleanPhone}, ${rec.cleanPhone}, ${rec.pinVal}, ${rec.pinVal}, ${rec.rankVal}, ${rec.nameVal}, ${rec.firstVal}, ${rec.lastVal}, ${rec.roleVal}, ${rec.cleanRegion}, ${rec.unitVal}, ${rec.activeVal}
+        )
+      `;
+      if (colSet.has('full_name')) {
+        await sql`
+          UPDATE users
+          SET full_name = ${rec.nameVal}
+          WHERE phone = ${rec.cleanPhone} OR phone_number = ${rec.cleanPhone}
+        `;
+      }
+
       return new Response(JSON.stringify({ success: true }), { headers });
     }
 
