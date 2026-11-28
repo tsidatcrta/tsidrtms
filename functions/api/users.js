@@ -18,33 +18,21 @@ export async function onRequest(context) {
   }
 
   try {
-    // 1. GET: ดึงรายชื่อผู้ใช้งานทั้งหมด (พร้อมข้อมูลหน่วยและกองทัพภาค) และรายการหน่วยฝึกสำหรับ Dropdown
+    // 1. GET: ดึงรายชื่อหน่วยฝึก และรายชื่อผู้ใช้งานทั้งหมด (ใช้คอลัมน์ name_surname)
     if (method === 'GET') {
       const mode = url.searchParams.get('mode');
 
-      // ดึงรายชื่อหน่วยฝึกทั้งหมด (294 หน่วย + หน่วยบังคับบัญชา)
       if (mode === 'units') {
         const units = await sql`
-          SELECT id, unit_code, unit_name, army_region, tier_level
-          FROM units
-          ORDER BY army_region ASC, unit_code ASC, unit_name ASC
+          SELECT * FROM units
+          ORDER BY id ASC
         `;
         return new Response(JSON.stringify({ success: true, units }), { headers });
       }
 
-      // ดึงรายชื่อผู้ใช้งานทั้งหมด
       const users = await sql`
         SELECT 
-          u.id,
-          u.phone,
-          u.rank,
-          u.full_name,
-          u.position,
-          u.role,
-          u.unit_id,
-          u.army_region,
-          u.is_active,
-          u.last_login_at,
+          u.*,
           un.unit_name,
           un.unit_code
         FROM users u
@@ -55,41 +43,63 @@ export async function onRequest(context) {
             WHEN 'command' THEN 2 
             ELSE 3 
           END,
-          u.army_region ASC,
-          un.unit_name ASC,
-          u.full_name ASC
+          u.id ASC
       `;
 
       return new Response(JSON.stringify({ success: true, users }), { headers });
     }
 
-    // 2. POST: เพิ่มผู้ใช้งานใหม่ 1 รายการ หรือ นำเข้าข้อมูลชุดใหญ่ (Bulk Import)
+    // 2. POST: เพิ่มผู้ใช้งานใหม่ หรือ นำเข้าชุดใหญ่ (รองรับรูปแบบ "01 : ทภ.1" และ "001 : ชื่อหน่วย")
     if (method === 'POST') {
       const body = await request.json();
 
-      // กรณี Bulk Import (นำเข้าจาก CSV/ข้อความวางเป็นชุด)
       if (body.action === 'bulk_import' && Array.isArray(body.records)) {
+        // โหลดรายการหน่วยทั้งหมดมาเตรียมจับคู่ด้วยรหัส 3 หลัก หรือชื่อหน่วย
+        const allUnits = await sql`SELECT id, unit_code, unit_name, army_region FROM units`;
+
         let importedCount = 0;
         let updatedCount = 0;
 
         for (const item of body.records) {
           const cleanPhone = String(item.phone || '').replace(/[^0-9]/g, '');
+          // ข้ามแถวหัวตารางหรือเบอร์โทรไม่ครบ 9-10 หลัก
           if (cleanPhone.length < 9) continue;
 
           const pin = String(item.pin || '123456').trim();
-          const role = item.role || 'unit';
-          const region = item.army_region || '';
-          const unitId = item.unit_id ? Number(item.unit_id) : null;
+          const role = ['admin', 'command', 'unit'].includes(item.role) ? item.role : 'unit';
+
+          // ตัดคำนำหน้า "01 : ทภ.1" ให้เหลือ "ทภ.1"
+          let cleanRegion = String(item.army_region || '').trim();
+          if (cleanRegion.includes(':')) {
+            cleanRegion = cleanRegion.split(':').pop().trim();
+          }
+
+          // จับคู่ unit_id จากรหัส "001 : ส.พัน.21 ทภ.1" หรือชื่อหน่วย
+          let unitId = item.unit_id ? Number(item.unit_id) : null;
+          if (!unitId && item.raw_unit) {
+            const rawUnit = String(item.raw_unit).trim();
+            const codePart = rawUnit.includes(':') ? rawUnit.split(':')[0].trim() : '';
+            const namePart = rawUnit.includes(':') ? rawUnit.split(':').slice(1).join(':').trim() : rawUnit;
+
+            const found = allUnits.find(u =>
+              (codePart && String(u.unit_code).trim() === codePart) ||
+              String(u.unit_name).trim() === namePart ||
+              String(u.unit_name).trim() === rawUnit
+            );
+            if (found) {
+              unitId = found.id;
+              if (!cleanRegion && found.army_region) cleanRegion = found.army_region;
+            }
+          }
 
           const existing = await sql`SELECT id FROM users WHERE phone = ${cleanPhone} LIMIT 1`;
           if (existing.length > 0) {
             await sql`
               UPDATE users 
               SET rank = ${item.rank || ''},
-                  full_name = ${item.full_name || ''},
-                  position = ${item.position || ''},
+                  name_surname = ${item.name_surname || ''},
                   role = ${role},
-                  army_region = ${region},
+                  army_region = ${cleanRegion},
                   unit_id = ${unitId},
                   is_active = true
               WHERE phone = ${cleanPhone}
@@ -97,8 +107,8 @@ export async function onRequest(context) {
             updatedCount++;
           } else {
             await sql`
-              INSERT INTO users (phone, pin, rank, full_name, position, role, army_region, unit_id, is_active)
-              VALUES (${cleanPhone}, ${pin}, ${item.rank || ''}, ${item.full_name || ''}, ${item.position || ''}, ${role}, ${region}, ${unitId}, true)
+              INSERT INTO users (phone, pin, rank, name_surname, role, army_region, unit_id, is_active)
+              VALUES (${cleanPhone}, ${pin}, ${item.rank || ''}, ${item.name_surname || ''}, ${role}, ${cleanRegion}, ${unitId}, true)
             `;
             importedCount++;
           }
@@ -110,9 +120,9 @@ export async function onRequest(context) {
         );
       }
 
-      // กรณีเพิ่มผู้ใช้งานทีละ 1 รายการ
+      // เพิ่มทีละ 1 รายการ
       const cleanPhone = String(body.phone || '').replace(/[^0-9]/g, '');
-      if (!cleanPhone || !body.full_name) {
+      if (!cleanPhone || !body.name_surname) {
         return new Response(
           JSON.stringify({ success: false, error: 'กรุณากรอกเบอร์โทรศัพท์และชื่อ-สกุลให้ครบถ้วน' }),
           { status: 400, headers }
@@ -131,13 +141,12 @@ export async function onRequest(context) {
       const unitId = body.unit_id ? Number(body.unit_id) : null;
 
       await sql`
-        INSERT INTO users (phone, pin, rank, full_name, position, role, army_region, unit_id, is_active)
+        INSERT INTO users (phone, pin, rank, name_surname, role, army_region, unit_id, is_active)
         VALUES (
           ${cleanPhone},
           ${pin},
           ${body.rank || ''},
-          ${body.full_name},
-          ${body.position || ''},
+          ${body.name_surname},
           ${body.role || 'unit'},
           ${body.army_region || ''},
           ${unitId},
@@ -148,30 +157,23 @@ export async function onRequest(context) {
       return new Response(JSON.stringify({ success: true }), { headers });
     }
 
-    // 3. PUT: แก้ไขข้อมูลผู้ใช้งาน / เปลี่ยนสิทธิ์ / รีเซ็ต PIN / เปิด-ปิดสถานะ
+    // 3. PUT: แก้ไขข้อมูล / รีเซ็ต PIN / เปิด-ปิดสถานะ
     if (method === 'PUT') {
       const body = await request.json();
       if (!body.id) {
-        return new Response(
-          JSON.stringify({ success: false, error: 'ไม่พบรหัสอ้างอิงผู้ใช้งาน' }),
-          { status: 400, headers }
-        );
+        return new Response(JSON.stringify({ success: false, error: 'ไม่พบ ID' }), { status: 400, headers });
       }
 
-      // รีเซ็ต PIN เฉพาะจุด
       if (body.action === 'reset_pin') {
-        const newPin = String(body.pin || '123456').trim();
-        await sql`UPDATE users SET pin = ${newPin} WHERE id = ${Number(body.id)}`;
+        await sql`UPDATE users SET pin = ${String(body.pin || '123456').trim()} WHERE id = ${Number(body.id)}`;
         return new Response(JSON.stringify({ success: true }), { headers });
       }
 
-      // เปิด/ปิด สถานะการใช้งาน
       if (body.action === 'toggle_status') {
         await sql`UPDATE users SET is_active = ${Boolean(body.is_active)} WHERE id = ${Number(body.id)}`;
         return new Response(JSON.stringify({ success: true }), { headers });
       }
 
-      // อัปเดตข้อมูลทั่วไป
       const cleanPhone = String(body.phone || '').replace(/[^0-9]/g, '');
       const unitId = body.unit_id ? Number(body.unit_id) : null;
 
@@ -181,8 +183,7 @@ export async function onRequest(context) {
           SET phone = ${cleanPhone},
               pin = ${String(body.pin).trim()},
               rank = ${body.rank || ''},
-              full_name = ${body.full_name || ''},
-              position = ${body.position || ''},
+              name_surname = ${body.name_surname || ''},
               role = ${body.role || 'unit'},
               army_region = ${body.army_region || ''},
               unit_id = ${unitId}
@@ -193,8 +194,7 @@ export async function onRequest(context) {
           UPDATE users
           SET phone = ${cleanPhone},
               rank = ${body.rank || ''},
-              full_name = ${body.full_name || ''},
-              position = ${body.position || ''},
+              name_surname = ${body.name_surname || ''},
               role = ${body.role || 'unit'},
               army_region = ${body.army_region || ''},
               unit_id = ${unitId}
@@ -205,19 +205,14 @@ export async function onRequest(context) {
       return new Response(JSON.stringify({ success: true }), { headers });
     }
 
-    // 4. DELETE: ลบผู้ใช้งาน (ป้องกันการลบแอดมินหลัก 0800000000)
+    // 4. DELETE: ลบผู้ใช้งาน
     if (method === 'DELETE') {
       const id = url.searchParams.get('id');
-      if (!id) {
-        return new Response(JSON.stringify({ success: false, error: 'ไม่พบ ID' }), { status: 400, headers });
-      }
+      if (!id) return new Response(JSON.stringify({ success: false, error: 'ไม่พบ ID' }), { status: 400, headers });
 
       const target = await sql`SELECT phone FROM users WHERE id = ${Number(id)} LIMIT 1`;
       if (target.length > 0 && target[0].phone === '0800000000') {
-        return new Response(
-          JSON.stringify({ success: false, error: 'ไม่สามารถลบบัญชีผู้ดูแลระบบหลักได้' }),
-          { status: 403, headers }
-        );
+        return new Response(JSON.stringify({ success: false, error: 'ไม่สามารถลบบัญชีแอดมินหลักได้' }), { status: 403, headers });
       }
 
       await sql`DELETE FROM users WHERE id = ${Number(id)}`;
